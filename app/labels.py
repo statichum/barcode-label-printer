@@ -17,11 +17,12 @@ from .printer import PrinterDiscovery
 ESC = b"\x1b"
 DESCRIPTION_MARGIN_DOTS = 40
 DESCRIPTION_CHARACTER_PITCH_DOTS = 18
-DESCRIPTION_FONT_HEIGHT_DOTS = 30
-DESCRIPTION_LINE_ADVANCE_DOTS = DESCRIPTION_FONT_HEIGHT_DOTS + 1
+DESCRIPTION_FONT_WIDTH_DOTS = 16
+DESCRIPTION_FONT_HEIGHT_DOTS = 28
+DESCRIPTION_LINE_ADVANCE_DOTS = 31
 ITEM_CODE_MARGIN_DOTS = 32
 ITEM_CODE_PREFERRED_WIDTH_DOTS = 23
-ITEM_CODE_PREFERRED_HEIGHT_DOTS = 43
+ITEM_CODE_PREFERRED_HEIGHT_DOTS = 49
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -47,12 +48,20 @@ def _command(code: str) -> bytes:
 
 
 def _description_line(text: str, y: int) -> bytes:
+    font_command = (
+        f"RDB01,{DESCRIPTION_FONT_WIDTH_DOTS:03d},"
+        f"{DESCRIPTION_FONT_HEIGHT_DOTS:03d},"
+    )
+    encoded = text.encode("ascii")
     return (
         _command(f"H{DESCRIPTION_MARGIN_DOTS:04d}")
         + _command(f"V{y:04d}")
-        + _command("L0202")
-        + _command("S")
-        + text.encode("ascii")
+        + _command(font_command)
+        + encoded
+        + _command(f"H{DESCRIPTION_MARGIN_DOTS + 1:04d}")
+        + _command(f"V{y:04d}")
+        + _command(font_command)
+        + encoded
     )
 
 
@@ -125,14 +134,15 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
         )
     payload += _command(f"H{barcode_x:04d}") + _command("V0154")
     payload += _command(f"BG{barcode_module:02d}120") + b">F" + barcode.encode("ascii")
-    payload += _command(f"H{item_x:04d}") + _command("V0296")
+    item_y = 290
+    payload += _command(f"H{item_x:04d}") + _command(f"V{item_y:04d}")
     if item_font == "RDB":
         item_command = (
             f"RDB01,{ITEM_CODE_PREFERRED_WIDTH_DOTS:03d},"
             f"{ITEM_CODE_PREFERRED_HEIGHT_DOTS:03d},"
         )
         payload += _command(item_command) + item_code.encode("ascii")
-        payload += _command(f"H{item_x + 1:04d}") + _command("V0296")
+        payload += _command(f"H{item_x + 1:04d}") + _command(f"V{item_y:04d}")
         payload += _command(item_command) + item_code.encode("ascii")
     else:
         payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
