@@ -15,11 +15,13 @@ from .printer import PrinterDiscovery
 
 
 ESC = b"\x1b"
-DESCRIPTION_MARGIN_DOTS = 32
-DESCRIPTION_FONT_WIDTH_DOTS = 16
-DESCRIPTION_FONT_HEIGHT_DOTS = 45
+DESCRIPTION_MARGIN_DOTS = 40
+DESCRIPTION_CHARACTER_PITCH_DOTS = 18
+DESCRIPTION_FONT_HEIGHT_DOTS = 30
 DESCRIPTION_LINE_ADVANCE_DOTS = DESCRIPTION_FONT_HEIGHT_DOTS + 1
 ITEM_CODE_MARGIN_DOTS = 32
+ITEM_CODE_PREFERRED_WIDTH_DOTS = 22
+ITEM_CODE_PREFERRED_HEIGHT_DOTS = 41
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -48,7 +50,7 @@ def _description_line(text: str, y: int) -> bytes:
     return (
         _command(f"H{DESCRIPTION_MARGIN_DOTS:04d}")
         + _command(f"V{y:04d}")
-        + _command("L0203")
+        + _command("L0202")
         + _command("S")
         + text.encode("ascii")
     )
@@ -81,7 +83,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
         raise ValueError("PRINTER_DARKNESS must be between 1A and 5A")
 
     description_width = width - (DESCRIPTION_MARGIN_DOTS * 2)
-    description_chars = description_width // DESCRIPTION_FONT_WIDTH_DOTS
+    description_chars = description_width // DESCRIPTION_CHARACTER_PITCH_DOTS
     description_lines = textwrap.wrap(
         description,
         width=description_chars,
@@ -92,10 +94,10 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
     item_available_width = width - (ITEM_CODE_MARGIN_DOTS * 2)
-    if len(item_code) * 24 <= item_available_width:
-        item_font = "S"
-        item_scale = "L0303"
-        item_text_width = len(item_code) * 24
+    if (len(item_code) * ITEM_CODE_PREFERRED_WIDTH_DOTS) + 1 <= item_available_width:
+        item_font = "RDB"
+        item_scale = None
+        item_text_width = (len(item_code) * ITEM_CODE_PREFERRED_WIDTH_DOTS) + 1
     elif len(item_code) * 16 <= item_available_width:
         item_font = "S"
         item_scale = "L0202"
@@ -124,7 +126,16 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     payload += _command(f"H{barcode_x:04d}") + _command("V0154")
     payload += _command(f"BG{barcode_module:02d}120") + b">F" + barcode.encode("ascii")
     payload += _command(f"H{item_x:04d}") + _command("V0296")
-    payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
+    if item_font == "RDB":
+        item_command = (
+            f"RDB01,{ITEM_CODE_PREFERRED_WIDTH_DOTS:03d},"
+            f"{ITEM_CODE_PREFERRED_HEIGHT_DOTS:03d},"
+        )
+        payload += _command(item_command) + item_code.encode("ascii")
+        payload += _command(f"H{item_x + 1:04d}") + _command("V0296")
+        payload += _command(item_command) + item_code.encode("ascii")
+    else:
+        payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
     payload += _command(f"Q{quantity}")
     payload += _command("Z")
     return bytes(payload)
