@@ -19,10 +19,12 @@ DESCRIPTION_FONT_WIDTH_DOTS = 18
 DESCRIPTION_FONT_HEIGHT_DOTS = 32
 DESCRIPTION_LINE_ADVANCE_DOTS = 35
 ITEM_CODE_MARGIN_DOTS = 32
+ITEM_CODE_PREFERRED_CELL_WIDTH_DOTS = 27
 ITEM_CODE_PREFERRED_WIDTH_DOTS = 28
 ITEM_CODE_PREFERRED_HEIGHT_DOTS = 59
 ITEM_CODE_BOTTOM_MARGIN_DOTS = 19
-BARCODE_HEIGHT_DOTS = 120
+ITEM_CODE_OVERPRINT_DOTS = 3
+BARCODE_HEIGHT_DOTS = 126
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -131,10 +133,9 @@ def _fixed_pitch_smooth_text(
         )
         glyph_x = x + (index * cell_width) + ((cell_width - glyph_width) // 2)
         encoded = character.encode("ascii")
-        payload += _command(f"H{glyph_x:04d}") + _command(f"V{y:04d}")
-        payload += _command(font_command) + encoded
-        payload += _command(f"H{glyph_x + 1:04d}") + _command(f"V{y:04d}")
-        payload += _command(font_command) + encoded
+        for offset in range(ITEM_CODE_OVERPRINT_DOTS):
+            payload += _command(f"H{glyph_x + offset:04d}") + _command(f"V{y:04d}")
+            payload += _command(font_command) + encoded
     return bytes(payload)
 
 
@@ -176,15 +177,18 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     barcode_x = max(32, (width - barcode_width) // 2)
     item_available_width = width - (ITEM_CODE_MARGIN_DOTS * 2)
     item_cell_width = min(
-        ITEM_CODE_PREFERRED_WIDTH_DOTS,
-        (item_available_width - 1) // len(item_code),
+        ITEM_CODE_PREFERRED_CELL_WIDTH_DOTS,
+        (item_available_width - ITEM_CODE_OVERPRINT_DOTS) // len(item_code),
     )
-    item_font_width = item_cell_width
+    item_font_width = min(
+        ITEM_CODE_PREFERRED_WIDTH_DOTS,
+        (item_available_width - ITEM_CODE_OVERPRINT_DOTS) // len(item_code),
+    )
     item_font_height = round(
         ITEM_CODE_PREFERRED_HEIGHT_DOTS
         * (item_font_width / ITEM_CODE_PREFERRED_WIDTH_DOTS)
     )
-    item_text_width = (len(item_code) * item_cell_width) + 1
+    item_text_width = (len(item_code) * item_cell_width) + ITEM_CODE_OVERPRINT_DOTS - 1
     item_x = max(ITEM_CODE_MARGIN_DOTS, (width - item_text_width) // 2)
     item_y = height - ITEM_CODE_BOTTOM_MARGIN_DOTS - item_font_height
 

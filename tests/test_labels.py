@@ -16,8 +16,8 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
         ESC + b"A" + ESC + b"CS2" + ESC + b"#E4A" + ESC + b"A103600600"
     )
     assert payload.count(ESC + b"RDB01,018,032,Dawnbreaker Frameset - Small") == 2
-    assert ESC + b"BG02120>F9412345678901" in payload
-    assert b"9412345678901" not in payload.split(ESC + b"BG02120", 1)[0]
+    assert ESC + b"BG02126>F9412345678901" in payload
+    assert b"9412345678901" not in payload.split(ESC + b"BG02126", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(ESC + b"RDB01,028,059,F") > payload.index(b"9412345678901")
 
@@ -70,7 +70,7 @@ def test_long_item_code_uses_a_smaller_smooth_font_to_preserve_margins(tmp_path)
 
     payload = build_label(item, 1, config)
 
-    assert payload.count(ESC + b"RDB01,014,030,X") == 72
+    assert payload.count(ESC + b"RDB01,014,030,X") == 108
 
 
 def test_item_code_digits_use_fixed_pitch_and_are_visually_centered(tmp_path):
@@ -81,8 +81,8 @@ def test_item_code_digits_use_fixed_pitch_and_are_visually_centered(tmp_path):
     payload = build_label(item, 1, config)
 
     assert ESC + b"H0266" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
-    assert ESC + b"H0294" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
-    assert ESC + b"H0322" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
+    assert ESC + b"H0293" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
+    assert ESC + b"H0320" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
 
 
 def test_barcode_moves_up_when_description_uses_fewer_lines(tmp_path):
@@ -93,8 +93,8 @@ def test_barcode_moves_up_when_description_uses_fewer_lines(tmp_path):
     one_line_payload = build_label(one_line, 1, config)
     three_line_payload = build_label(three_lines, 1, config)
 
-    assert ESC + b"V0090" + ESC + b"BG02120" in one_line_payload
-    assert ESC + b"V0132" + ESC + b"BG02120" in three_line_payload
+    assert ESC + b"V0088" + ESC + b"BG02126" in one_line_payload
+    assert ESC + b"V0130" + ESC + b"BG02126" in three_line_payload
 
 
 def test_text_cannot_inject_sbpl_commands():
