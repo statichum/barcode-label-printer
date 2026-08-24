@@ -43,7 +43,7 @@ def _code128_size(value: str, available_width: int) -> tuple[int, int]:
     # Start, data, checksum and stop symbols. Code Set B uses one symbol per
     # character; every symbol is 11 modules except the 13-module stop symbol.
     modules = (len(value) + 2) * 11 + 13
-    module_width = min(4, available_width // modules)
+    module_width = min(2, available_width // modules)
     if module_width < 2:
         raise ValueError("Barcode is too long to print reliably on a 50 mm label")
     return module_width, modules * module_width
@@ -57,7 +57,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     description = safe_sbpl_text(item.description, 200)
     description_lines = textwrap.wrap(
         description,
-        width=72,
+        width=44,
         break_long_words=True,
         break_on_hyphens=True,
     )[:2] or [item_code]
@@ -69,26 +69,21 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
 
     barcode_module, barcode_width = _code128_size(barcode, width - 48)
     barcode_x = max(24, (width - barcode_width) // 2)
-    if len(item_code) <= 33:
-        item_font = "XS"
-        item_text_width = len(item_code) * 17
-    else:
-        item_font = "S"
-        item_text_width = len(item_code) * 8
+    item_text_width = len(item_code) * 16
     item_x = max(12, (width - item_text_width) // 2)
 
     payload = bytearray()
     payload += _command("A")
     payload += _command(f"A1{height:04d}{width:04d}")
-    payload += _command("H0012") + _command("V0008") + _command("L0101")
-    payload += _command("S") + description_lines[0].encode("ascii")
+    payload += _command("H0012") + _command("V0006") + _command("L0101")
+    payload += _command("M") + description_lines[0].encode("ascii")
     if len(description_lines) > 1:
-        payload += _command("H0012") + _command("V0025") + _command("S")
+        payload += _command("H0012") + _command("V0028") + _command("M")
         payload += description_lines[1].encode("ascii")
-    payload += _command(f"H{barcode_x:04d}") + _command("V0052")
-    payload += _command(f"BG{barcode_module:02d}250") + b">F" + barcode.encode("ascii")
-    payload += _command(f"H{item_x:04d}") + _command("V0325") + _command("L0101")
-    payload += _command(item_font) + item_code.encode("ascii")
+    payload += _command(f"H{barcode_x:04d}") + _command("V0060")
+    payload += _command(f"BG{barcode_module:02d}215") + b">F" + barcode.encode("ascii")
+    payload += _command(f"H{item_x:04d}") + _command("V0310") + _command("L0202")
+    payload += _command("S") + item_code.encode("ascii")
     payload += _command(f"Q{quantity}")
     payload += _command("Z")
     return bytes(payload)

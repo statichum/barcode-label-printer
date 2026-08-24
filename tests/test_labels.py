@@ -13,22 +13,23 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     payload = build_label(item, 3, config)
 
     assert payload.startswith(ESC + b"A" + ESC + b"A103600600")
-    assert ESC + b"S" + b"Dawnbreaker Frameset - Small" in payload
-    assert ESC + b"BG03250>F9412345678901" in payload
-    assert b"9412345678901" not in payload.split(ESC + b"BG03250", 1)[0]
+    assert ESC + b"M" + b"Dawnbreaker Frameset - Small" in payload
+    assert ESC + b"BG02215>F9412345678901" in payload
+    assert b"9412345678901" not in payload.split(ESC + b"BG02215", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
+    assert ESC + b"V0310" + ESC + b"L0202" + ESC + b"SFXL9301-00067" in payload
 
 
 def test_description_is_cut_off_after_two_tightly_spaced_small_lines(tmp_path):
     config = settings(tmp_path)
-    description = "A" * 72 + " " + "B" * 72 + " " + "SHOULD-NOT-PRINT"
+    description = "A" * 44 + " " + "B" * 44 + " " + "SHOULD-NOT-PRINT"
     item = CatalogItem("ITEM-1", description, "9412345678901")
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"V0008" + ESC + b"L0101" + ESC + b"S" + b"A" * 72 in payload
-    assert ESC + b"V0025" + ESC + b"S" + b"B" * 72 in payload
+    assert ESC + b"V0006" + ESC + b"L0101" + ESC + b"M" + b"A" * 44 in payload
+    assert ESC + b"V0028" + ESC + b"M" + b"B" * 44 in payload
     assert b"SHOULD-NOT-PRINT" not in payload
 
 
