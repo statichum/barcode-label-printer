@@ -103,6 +103,11 @@ class PrinterDiscovery:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise PrinterUnavailable("Printer network discovery could not run") from exc
 
+            if result.returncode != 0:
+                detail = result.stderr.strip() or "no diagnostic output"
+                raise PrinterUnavailable(
+                    f"Printer network discovery failed ({result.returncode}): {detail}"
+                )
             ip = parse_arp_scan(result.stdout, self.settings.printer_mac)
             if not ip:
                 raise PrinterUnavailable(

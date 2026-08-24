@@ -151,7 +151,11 @@ def print_labels(request: PrintRequest):
             source=request.source,
             reference=request.reference,
         )
-    except (PrinterUnavailable, ValueError) as exc:
+    except ValueError as exc:
+        logger.warning("Label generation failed: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PrinterUnavailable as exc:
+        logger.warning("Printer connection failed: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     logger.info(
         "Print job %s %s with %s labels",
