@@ -12,7 +12,9 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
 
     payload = build_label(item, 3, config)
 
-    assert payload.startswith(ESC + b"A" + ESC + b"A103600600")
+    assert payload.startswith(
+        ESC + b"A" + ESC + b"CS2" + ESC + b"#E4A" + ESC + b"A103600600"
+    )
     assert ESC + b"M" + b"Dawnbreaker Frameset - Small" in payload
     assert ESC + b"BG02190>F9412345678901" in payload
     assert b"9412345678901" not in payload.split(ESC + b"BG02190", 1)[0]
@@ -24,11 +26,11 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
 def test_description_is_cut_off_after_three_tightly_spaced_lines(tmp_path):
     config = settings(tmp_path)
     description = (
-        "A" * 43
+        "A" * 41
         + " "
-        + "B" * 43
+        + "B" * 41
         + " "
-        + "C" * 43
+        + "C" * 41
         + " "
         + "SHOULD-NOT-PRINT"
     )
@@ -36,11 +38,20 @@ def test_description_is_cut_off_after_three_tightly_spaced_lines(tmp_path):
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"L0101" + ESC + b"H0020" + ESC + b"V0010" in payload
-    assert payload.count(ESC + b"M" + b"A" * 43) == 2
-    assert ESC + b"V0032" + ESC + b"M" + b"B" * 43 in payload
-    assert ESC + b"V0054" + ESC + b"M" + b"C" * 43 in payload
+    assert ESC + b"L0101" + ESC + b"H0032" + ESC + b"V0010" in payload
+    assert payload.count(ESC + b"M" + b"A" * 41) == 2
+    assert ESC + b"V0032" + ESC + b"M" + b"B" * 41 in payload
+    assert ESC + b"V0054" + ESC + b"M" + b"C" * 41 in payload
     assert b"SHOULD-NOT-PRINT" not in payload
+
+
+def test_invalid_print_quality_settings_are_rejected(tmp_path):
+    item = CatalogItem("ITEM-1", "Example item", "9412345678901")
+
+    with pytest.raises(ValueError, match="PRINTER_PRINT_SPEED"):
+        build_label(item, 1, settings(tmp_path, printer_print_speed=5))
+    with pytest.raises(ValueError, match="PRINTER_DARKNESS"):
+        build_label(item, 1, settings(tmp_path, printer_darkness="6A"))
 
 
 def test_long_item_code_uses_a_font_that_preserves_side_margins(tmp_path):

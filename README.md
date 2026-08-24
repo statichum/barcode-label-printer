@@ -57,12 +57,16 @@ PRINTER_LANGUAGE=SBPL
 PRINTER_MAC=00:19:98:84:26:F9
 PRINTER_PORT=9100
 ARP_INTERFACE=enp5s0
+PRINTER_PRINT_SPEED=2
+PRINTER_DARKNESS=4A
 
 LABEL_WIDTH_MM=50
 LABEL_HEIGHT_MM=30
 PRINTER_DOTS_PER_MM=12
 PRINT_ENABLED=false
 ```
+
+For the CG4, print speed `2`, `3`, and `4` select 50, 75, and 100 mm/s respectively. Darkness accepts `1A` through `5A`. Start at speed `2` and darkness `4A`, then reduce darkness if barcode bars become thick or lose edge definition.
 
 The supplied MYOB endpoint currently needs certificate verification disabled, matching the successful `curl -k` test:
 

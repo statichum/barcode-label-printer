@@ -42,6 +42,8 @@ class Settings:
     arp_interface: str
     printer_connect_timeout_seconds: int
     printer_reopen_delay_ms: int
+    printer_print_speed: int
+    printer_darkness: str
     print_enabled: bool
     label_width_mm: int
     label_height_mm: int
@@ -75,6 +77,8 @@ class Settings:
             arp_interface=os.getenv("ARP_INTERFACE", "enp5s0"),
             printer_connect_timeout_seconds=_int("PRINTER_CONNECT_TIMEOUT_SECONDS", 3),
             printer_reopen_delay_ms=_int("PRINTER_REOPEN_DELAY_MS", 250),
+            printer_print_speed=_int("PRINTER_PRINT_SPEED", 2),
+            printer_darkness=os.getenv("PRINTER_DARKNESS", "4A").strip().upper(),
             print_enabled=_bool("PRINT_ENABLED", False),
             label_width_mm=_int("LABEL_WIDTH_MM", 50),
             label_height_mm=_int("LABEL_HEIGHT_MM", 30),
@@ -101,4 +105,8 @@ class Settings:
         ):
             if not value:
                 missing.append(name)
+        if self.printer_print_speed not in {2, 3, 4}:
+            missing.append("PRINTER_PRINT_SPEED (use 2, 3, or 4)")
+        if self.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
+            missing.append("PRINTER_DARKNESS (use 1A through 5A)")
         return missing

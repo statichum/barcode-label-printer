@@ -42,11 +42,11 @@ def _command(code: str) -> bytes:
 def _bold_description_line(text: str, y: int) -> bytes:
     encoded = text.encode("ascii")
     return (
-        _command("H0020")
+        _command("H0032")
         + _command(f"V{y:04d}")
         + _command("M")
         + encoded
-        + _command("H0021")
+        + _command("H0033")
         + _command(f"V{y:04d}")
         + _command("M")
         + encoded
@@ -71,7 +71,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     description = safe_sbpl_text(item.description, 200)
     description_lines = textwrap.wrap(
         description,
-        width=43,
+        width=41,
         break_long_words=True,
         break_on_hyphens=True,
     )[:3] or [item_code]
@@ -80,6 +80,10 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     height = settings.label_height_dots
     if width != 600 or height != 360:
         raise ValueError("The current label layout supports 50 x 30 mm at 12 dots/mm")
+    if settings.printer_print_speed not in {2, 3, 4}:
+        raise ValueError("PRINTER_PRINT_SPEED must be 2, 3, or 4")
+    if settings.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
+        raise ValueError("PRINTER_DARKNESS must be between 1A and 5A")
 
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
@@ -95,6 +99,8 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
 
     payload = bytearray()
     payload += _command("A")
+    payload += _command(f"CS{settings.printer_print_speed}")
+    payload += _command(f"#E{settings.printer_darkness}")
     payload += _command(f"A1{height:04d}{width:04d}")
     payload += _command("L0101")
     payload += _bold_description_line(description_lines[0], 10)
