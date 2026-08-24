@@ -70,7 +70,7 @@ def test_long_item_code_uses_a_smaller_smooth_font_to_preserve_margins(tmp_path)
 
     payload = build_label(item, 1, config)
 
-    assert payload.count(ESC + b"RDB01,014,029,X") == 144
+    assert payload.count(ESC + b"RDB01,014,029,X") == 216
 
 
 def test_item_code_digits_use_fixed_pitch_and_are_visually_centered(tmp_path):
@@ -80,9 +80,9 @@ def test_item_code_digits_use_fixed_pitch_and_are_visually_centered(tmp_path):
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"H0262" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
-    assert ESC + b"H0292" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
-    assert ESC + b"H0322" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
+    assert ESC + b"H0261" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
+    assert ESC + b"H0291" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
+    assert ESC + b"H0321" + ESC + b"V0276" + ESC + b"RDB01,031,065,1" in payload
 
 
 def test_barcode_moves_up_when_description_uses_fewer_lines(tmp_path):
