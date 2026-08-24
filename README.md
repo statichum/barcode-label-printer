@@ -10,7 +10,7 @@ The operator can:
 - add item codes and quantities manually; and
 - print the item description, item code, and scannable Code 128 barcode.
 
-MYOB supplies the PO item codes and ordered quantities. The description and barcode are read from `sf_prodoptions` in the PRV syncer PostgreSQL database.
+MYOB supplies the PO item codes and ordered quantities. Descriptions are read from `sf_prodoptions` in the PRV syncer PostgreSQL database, with MYOB's stock-item description as a fallback. Barcodes are always read live from the MYOB `StockItem` `CrossReferences` collection, using the entry whose `AlternateType` is `Barcode`.
 
 ## Safety and network behavior
 

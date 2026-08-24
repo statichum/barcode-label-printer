@@ -12,12 +12,11 @@ ITEMS_SQL = """
 SELECT DISTINCT ON (inventory_id)
     inventory_id,
     description,
-    barcode
+    NULL::text AS barcode
 FROM sf_prodoptions
 WHERE inventory_id = ANY(%s)
 ORDER BY
     inventory_id,
-    (barcode IS NOT NULL AND barcode <> '') DESC,
     description NULLS LAST
 """
 
@@ -69,4 +68,3 @@ class CatalogRepository:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
-

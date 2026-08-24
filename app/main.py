@@ -12,7 +12,13 @@ from .config import Settings
 from .database import CatalogRepository
 from .labels import PrintService
 from .models import ManualItemLookupRequest, PrintRequest, PurchaseOrderLookupRequest
-from .myob import MyobClient, MyobError, PurchaseOrderNotFound, merge_purchase_order
+from .myob import (
+    MyobClient,
+    MyobError,
+    PurchaseOrderNotFound,
+    merge_catalog_items,
+    merge_purchase_order,
+)
 from .printer import PrinterDiscovery, PrinterUnavailable
 
 
@@ -37,6 +43,13 @@ app = FastAPI(
 
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def load_catalog_items(item_codes: list[str]):
+    codes = list(dict.fromkeys(code.strip().upper() for code in item_codes if code.strip()))
+    database_items = catalog.get_items(codes)
+    myob_items = myob.get_stock_items(codes)
+    return merge_catalog_items(codes, database_items, myob_items)
 
 
 @app.on_event("startup")
@@ -81,7 +94,7 @@ def purchase_order_lookup(request: PurchaseOrderLookupRequest):
             str(line.get("InventoryID", {}).get("value", "")).strip()
             for line in order.get("Details", [])
         ]
-        enriched = catalog.get_items(code for code in item_codes if code)
+        enriched = load_catalog_items(item_codes)
         return merge_purchase_order(order, enriched)
     except PurchaseOrderNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -99,7 +112,10 @@ def purchase_order_lookup(request: PurchaseOrderLookupRequest):
 @app.post("/api/items/lookup")
 def manual_item_lookup(request: ManualItemLookupRequest):
     try:
-        found = catalog.get_items(request.item_codes)
+        found = load_catalog_items(request.item_codes)
+    except MyobError as exc:
+        logger.warning("MYOB stock item lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except psycopg.Error as exc:
         logger.exception("Database lookup failed")
         raise HTTPException(
@@ -109,7 +125,7 @@ def manual_item_lookup(request: ManualItemLookupRequest):
     return {
         "items": [
             {
-                "item_code": code,
+                "item_code": found[code].item_code if code in found else code,
                 "description": found[code].description if code in found else code,
                 "barcode": found[code].barcode if code in found else None,
                 "quantity": 1,
@@ -117,7 +133,7 @@ def manual_item_lookup(request: ManualItemLookupRequest):
                 "printable": bool(code in found and found[code].barcode),
                 "warning": None
                 if code in found and found[code].barcode
-                else "Item or barcode not found in the syncer database",
+                else "Item or barcode cross-reference not found in MYOB",
             }
             for code in request.item_codes
         ]
@@ -128,7 +144,10 @@ def manual_item_lookup(request: ManualItemLookupRequest):
 def print_labels(request: PrintRequest):
     requested_codes = [item.item_code for item in request.items]
     try:
-        found = catalog.get_items(requested_codes)
+        found = load_catalog_items(requested_codes)
+    except MyobError as exc:
+        logger.warning("MYOB stock item lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except psycopg.Error as exc:
         logger.exception("Database lookup failed")
         raise HTTPException(
