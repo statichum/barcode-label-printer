@@ -20,7 +20,7 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     assert b"9412345678901" not in payload.split(ESC + b"BG02120", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
-    assert payload.count(ESC + b"RDB01,022,041,FXL9301-00067") == 2
+    assert payload.count(ESC + b"RDB01,023,043,FXL9301-00067") == 2
 
 
 def test_description_uses_dot_based_margins_and_three_larger_lines(tmp_path):
