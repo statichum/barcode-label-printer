@@ -1,0 +1,5 @@
+services:
+  barcode-label-printer:
+    build: .
+    image: barcode-label-printer:local
+

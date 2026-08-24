@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#153f36" />
+    <title>PRV Label Station</title>
+    <meta
+      name="description"
+      content="Look up purchase orders and print product barcode labels."
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="PRV Label Station home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><b>PRV</b><small>Label Station</small></span>
+      </a>
+      <div class="printer-pill" id="printer-status" role="status" aria-live="polite">
+        <span class="status-dot checking"></span>
+        <span class="printer-status-copy">
+          <b>Checking printer</b>
+          <small>SATO CG412DT</small>
+        </span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">WAREHOUSE TOOL</p>
+        <h1>Print product labels,<br /><span>without the detour.</span></h1>
+        <p class="intro">
+          Load a purchase order or add individual item codes. Review quantities,
+          then send ready-to-scan labels to the SATO printer.
+        </p>
+      </section>
+
+      <section class="workspace" aria-label="Label preparation">
+        <div class="mode-tabs" role="tablist" aria-label="Label source">
+          <button class="mode-tab active" role="tab" aria-selected="true" aria-controls="po-panel" id="po-tab" data-mode="po">
+            <span class="tab-number">01</span> Purchase order
+          </button>
+          <button class="mode-tab" role="tab" aria-selected="false" aria-controls="manual-panel" id="manual-tab" data-mode="manual">
+            <span class="tab-number">02</span> Manual entry
+          </button>
+        </div>
+
+        <div class="panel active" id="po-panel" role="tabpanel" aria-labelledby="po-tab">
+          <form id="po-form" class="lookup-form">
+            <label for="po-number">Purchase order number</label>
+            <div class="lookup-row">
+              <div class="input-wrap">
+                <span aria-hidden="true">PO</span>
+                <input id="po-number" name="po_number" type="text" inputmode="numeric" autocomplete="off" placeholder="000796" maxlength="40" required />
+              </div>
+              <button class="primary-button" type="submit">
+                <span>Find order</span><span aria-hidden="true">→</span>
+              </button>
+            </div>
+            <p class="field-help">The full PO number, including leading zeroes.</p>
+          </form>
+        </div>
+
+        <div class="panel" id="manual-panel" role="tabpanel" aria-labelledby="manual-tab" hidden>
+          <form id="manual-form" class="lookup-form">
+            <label for="item-code">Item code</label>
+            <div class="lookup-row manual-row">
+              <div class="input-wrap">
+                <span aria-hidden="true">SKU</span>
+                <input id="item-code" name="item_code" type="text" autocomplete="off" placeholder="FXL9301-00067" maxlength="80" required />
+              </div>
+              <div class="quantity-field">
+                <label for="manual-quantity">Qty</label>
+                <input id="manual-quantity" type="number" min="1" max="999" value="1" required />
+              </div>
+              <button class="primary-button" type="submit">
+                <span>Add item</span><span aria-hidden="true">＋</span>
+              </button>
+            </div>
+            <p class="field-help">Add one item at a time; quantities can still be changed below.</p>
+          </form>
+        </div>
+      </section>
+
+      <div id="message" class="message" role="alert" aria-live="assertive" hidden></div>
+
+      <section id="results" class="results" hidden aria-live="polite">
+        <div class="results-heading">
+          <div>
+            <p class="eyebrow" id="result-kicker">PURCHASE ORDER</p>
+            <h2 id="result-title">Labels</h2>
+            <p id="result-meta"></p>
+          </div>
+          <div class="selection-tools">
+            <button type="button" class="text-button" id="select-all">Select all</button>
+            <span aria-hidden="true">/</span>
+            <button type="button" class="text-button" id="select-none">Clear</button>
+          </div>
+        </div>
+
+        <div class="table-shell">
+          <div class="table-head" aria-hidden="true">
+            <span>Print</span><span>Product</span><span>Barcode</span><span>Quantity</span>
+          </div>
+          <div id="item-list" class="item-list"></div>
+        </div>
+
+        <footer class="print-bar">
+          <div class="print-summary">
+            <span class="summary-count" id="label-count">0</span>
+            <span><b>labels ready</b><small id="item-count">0 items selected</small></span>
+          </div>
+          <button type="button" id="print-button" class="print-button" disabled>
+            <span class="printer-icon" aria-hidden="true"></span>
+            <span id="print-button-label">Print labels</span>
+          </button>
+        </footer>
+      </section>
+    </main>
+
+    <template id="item-template">
+      <article class="item-row">
+        <div class="check-cell">
+          <label class="check-control">
+            <input class="item-check" type="checkbox" />
+            <span aria-hidden="true">✓</span>
+            <span class="sr-only">Select item</span>
+          </label>
+        </div>
+        <div class="product-cell">
+          <b class="item-description"></b>
+          <code class="item-code"></code>
+          <small class="item-warning" hidden></small>
+        </div>
+        <div class="barcode-cell">
+          <div class="barcode-bars" aria-hidden="true"></div>
+          <code class="barcode-value"></code>
+        </div>
+        <div class="qty-cell">
+          <button type="button" class="qty-minus" aria-label="Decrease quantity">−</button>
+          <input class="item-quantity" type="number" min="1" max="999" aria-label="Label quantity" />
+          <button type="button" class="qty-plus" aria-label="Increase quantity">＋</button>
+        </div>
+      </article>
+    </template>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
+
