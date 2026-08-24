@@ -57,32 +57,35 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     description = safe_sbpl_text(item.description, 200)
     description_lines = textwrap.wrap(
         description,
-        width=44,
+        width=43,
         break_long_words=True,
         break_on_hyphens=True,
-    )[:2] or [item_code]
+    )[:3] or [item_code]
 
     width = settings.label_width_dots
     height = settings.label_height_dots
     if width != 600 or height != 360:
         raise ValueError("The current label layout supports 50 x 30 mm at 12 dots/mm")
 
-    barcode_module, barcode_width = _code128_size(barcode, width - 48)
-    barcode_x = max(24, (width - barcode_width) // 2)
+    barcode_module, barcode_width = _code128_size(barcode, width - 64)
+    barcode_x = max(32, (width - barcode_width) // 2)
     item_text_width = len(item_code) * 16
-    item_x = max(12, (width - item_text_width) // 2)
+    item_x = max(20, (width - item_text_width) // 2)
 
     payload = bytearray()
     payload += _command("A")
     payload += _command(f"A1{height:04d}{width:04d}")
-    payload += _command("H0012") + _command("V0006") + _command("L0101")
+    payload += _command("H0020") + _command("V0010") + _command("L0101")
     payload += _command("M") + description_lines[0].encode("ascii")
     if len(description_lines) > 1:
-        payload += _command("H0012") + _command("V0028") + _command("M")
+        payload += _command("H0020") + _command("V0032") + _command("M")
         payload += description_lines[1].encode("ascii")
-    payload += _command(f"H{barcode_x:04d}") + _command("V0060")
-    payload += _command(f"BG{barcode_module:02d}215") + b">F" + barcode.encode("ascii")
-    payload += _command(f"H{item_x:04d}") + _command("V0310") + _command("L0202")
+    if len(description_lines) > 2:
+        payload += _command("H0020") + _command("V0054") + _command("M")
+        payload += description_lines[2].encode("ascii")
+    payload += _command(f"H{barcode_x:04d}") + _command("V0084")
+    payload += _command(f"BG{barcode_module:02d}190") + b">F" + barcode.encode("ascii")
+    payload += _command(f"H{item_x:04d}") + _command("V0306") + _command("L0202")
     payload += _command("S") + item_code.encode("ascii")
     payload += _command(f"Q{quantity}")
     payload += _command("Z")
