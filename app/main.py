@@ -5,7 +5,7 @@ from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings
@@ -51,6 +51,11 @@ def startup() -> None:
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(static_dir / "index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 @app.get("/api/health")
