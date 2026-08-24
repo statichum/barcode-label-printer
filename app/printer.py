@@ -5,6 +5,7 @@ import re
 import socket
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 
 from .config import Settings
@@ -144,6 +145,7 @@ class PrinterDiscovery:
 
     def send(self, payload: bytes) -> str:
         ip = self.resolve()
+        self._wait_for_port_reopen()
         try:
             with socket.create_connection(
                 (ip, self.settings.printer_port),
@@ -152,6 +154,7 @@ class PrinterDiscovery:
                 connection.sendall(payload)
         except OSError:
             ip = self.resolve(force_scan=True)
+            self._wait_for_port_reopen()
             try:
                 with socket.create_connection(
                     (ip, self.settings.printer_port),
@@ -159,5 +162,10 @@ class PrinterDiscovery:
                 ) as connection:
                     connection.sendall(payload)
             except OSError as exc:
-                raise PrinterUnavailable("The print data could not be sent") from exc
+                raise PrinterUnavailable(
+                    f"The print data could not be sent ({type(exc).__name__}: {exc})"
+                ) from exc
         return ip
+
+    def _wait_for_port_reopen(self) -> None:
+        time.sleep(max(0, self.settings.printer_reopen_delay_ms) / 1000)

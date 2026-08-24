@@ -18,6 +18,7 @@ MYOB supplies the PO item codes and ordered quantities. The description and barc
 - The SATO is identified by `PRINTER_MAC`, not its DHCP address.
 - The last working address is cached under `data/` and checked before another LAN scan.
 - If sending fails, the cache is invalidated, the printer is rediscovered, and the job is retried once.
+- Connections pause for `PRINTER_REOPEN_DELAY_MS` before reopening port 9100, as required by the CG4 LAN interface.
 - Printing uses raw SBPL over TCP port 9100. CUPS is not required.
 - Raw port 9100 confirms that bytes were submitted, but does not provide a durable printer job ID.
 - The UI does not implement user authentication. Keep port 4050 restricted to the trusted warehouse LAN or place it behind the existing authenticated reverse proxy.

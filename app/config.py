@@ -41,6 +41,7 @@ class Settings:
     printer_ip_override: str | None
     arp_interface: str
     printer_connect_timeout_seconds: int
+    printer_reopen_delay_ms: int
     print_enabled: bool
     label_width_mm: int
     label_height_mm: int
@@ -73,6 +74,7 @@ class Settings:
             printer_ip_override=os.getenv("PRINTER_IP_OVERRIDE") or None,
             arp_interface=os.getenv("ARP_INTERFACE", "enp5s0"),
             printer_connect_timeout_seconds=_int("PRINTER_CONNECT_TIMEOUT_SECONDS", 3),
+            printer_reopen_delay_ms=_int("PRINTER_REOPEN_DELAY_MS", 250),
             print_enabled=_bool("PRINT_ENABLED", False),
             label_width_mm=_int("LABEL_WIDTH_MM", 50),
             label_height_mm=_int("LABEL_HEIGHT_MM", 30),

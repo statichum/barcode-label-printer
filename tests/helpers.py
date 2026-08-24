@@ -27,6 +27,7 @@ def settings(tmp_path: Path, **overrides) -> Settings:
         "printer_ip_override": None,
         "arp_interface": "enp5s0",
         "printer_connect_timeout_seconds": 1,
+        "printer_reopen_delay_ms": 250,
         "print_enabled": False,
         "label_width_mm": 50,
         "label_height_mm": 30,
@@ -36,4 +37,3 @@ def settings(tmp_path: Path, **overrides) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
-
