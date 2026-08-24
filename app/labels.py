@@ -15,6 +15,10 @@ from .printer import PrinterDiscovery
 
 
 ESC = b"\x1b"
+DESCRIPTION_MARGIN_DOTS = 32
+DESCRIPTION_FONT_WIDTH_DOTS = 16
+DESCRIPTION_FONT_HEIGHT_DOTS = 25
+ITEM_CODE_MARGIN_DOTS = 32
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -39,17 +43,15 @@ def _command(code: str) -> bytes:
     return ESC + code.encode("ascii")
 
 
-def _bold_description_line(text: str, y: int) -> bytes:
-    encoded = text.encode("ascii")
+def _description_line(text: str, y: int) -> bytes:
     return (
-        _command("H0032")
+        _command(f"H{DESCRIPTION_MARGIN_DOTS:04d}")
         + _command(f"V{y:04d}")
-        + _command("M")
-        + encoded
-        + _command("H0033")
-        + _command(f"V{y:04d}")
-        + _command("M")
-        + encoded
+        + _command(
+            f"RDB01,{DESCRIPTION_FONT_WIDTH_DOTS:03d},"
+            f"{DESCRIPTION_FONT_HEIGHT_DOTS:03d},"
+        )
+        + text.encode("ascii")
     )
 
 
@@ -69,12 +71,6 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     barcode = safe_barcode(item.barcode)
     item_code = safe_sbpl_text(item.item_code, 36)
     description = safe_sbpl_text(item.description, 200)
-    description_lines = textwrap.wrap(
-        description,
-        width=41,
-        break_long_words=True,
-        break_on_hyphens=True,
-    )[:3] or [item_code]
 
     width = settings.label_width_dots
     height = settings.label_height_dots
@@ -85,9 +81,23 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     if settings.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
         raise ValueError("PRINTER_DARKNESS must be between 1A and 5A")
 
+    description_width = width - (DESCRIPTION_MARGIN_DOTS * 2)
+    description_chars = description_width // DESCRIPTION_FONT_WIDTH_DOTS
+    description_lines = textwrap.wrap(
+        description,
+        width=description_chars,
+        break_long_words=True,
+        break_on_hyphens=True,
+    )[:3] or [item_code]
+
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
-    if len(item_code) * 16 <= width - 40:
+    item_available_width = width - (ITEM_CODE_MARGIN_DOTS * 2)
+    if len(item_code) * 24 <= item_available_width:
+        item_font = "S"
+        item_scale = "L0303"
+        item_text_width = len(item_code) * 24
+    elif len(item_code) * 16 <= item_available_width:
         item_font = "S"
         item_scale = "L0202"
         item_text_width = len(item_code) * 16
@@ -95,22 +105,21 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
         item_font = "M"
         item_scale = "L0101"
         item_text_width = len(item_code) * 13
-    item_x = max(20, (width - item_text_width) // 2)
+    item_x = max(ITEM_CODE_MARGIN_DOTS, (width - item_text_width) // 2)
 
     payload = bytearray()
     payload += _command("A")
     payload += _command(f"CS{settings.printer_print_speed}")
     payload += _command(f"#E{settings.printer_darkness}")
     payload += _command(f"A1{height:04d}{width:04d}")
-    payload += _command("L0101")
-    payload += _bold_description_line(description_lines[0], 10)
+    payload += _description_line(description_lines[0], 8)
     if len(description_lines) > 1:
-        payload += _bold_description_line(description_lines[1], 32)
+        payload += _description_line(description_lines[1], 34)
     if len(description_lines) > 2:
-        payload += _bold_description_line(description_lines[2], 54)
-    payload += _command(f"H{barcode_x:04d}") + _command("V0084")
+        payload += _description_line(description_lines[2], 60)
+    payload += _command(f"H{barcode_x:04d}") + _command("V0094")
     payload += _command(f"BG{barcode_module:02d}190") + b">F" + barcode.encode("ascii")
-    payload += _command(f"H{item_x:04d}") + _command("V0306")
+    payload += _command(f"H{item_x:04d}") + _command("V0296")
     payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
     payload += _command(f"Q{quantity}")
     payload += _command("Z")
