@@ -23,7 +23,7 @@ class ManualItemLookupRequest(BaseModel):
     def clean_codes(cls, values: list[str]) -> list[str]:
         cleaned: list[str] = []
         for value in values:
-            code = value.strip()
+            code = value.strip().upper()
             if not code or len(code) > 80 or any(ord(char) < 32 for char in code):
                 raise ValueError("One or more item codes are invalid")
             if code not in cleaned:
@@ -37,6 +37,11 @@ class PrintItemRequest(BaseModel):
     item_code: str = Field(min_length=1, max_length=80)
     quantity: int = Field(ge=1, le=999)
 
+    @field_validator("item_code")
+    @classmethod
+    def clean_item_code(cls, value: str) -> str:
+        return value.strip().upper()
+
 
 class PrintRequest(BaseModel):
     items: list[PrintItemRequest] = Field(min_length=1, max_length=100)
@@ -49,4 +54,3 @@ class PrintRequest(BaseModel):
         if sum(item.quantity for item in values) > 2000:
             raise ValueError("A print job cannot exceed 2,000 labels")
         return values
-

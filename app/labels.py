@@ -83,11 +83,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
 
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
-    if len(item_code) * 18 <= width - 40:
-        item_font = "WB"
-        item_scale = "L0101"
-        item_text_width = len(item_code) * 18
-    elif len(item_code) * 16 <= width - 40:
+    if len(item_code) * 16 <= width - 40:
         item_font = "S"
         item_scale = "L0202"
         item_text_width = len(item_code) * 16
