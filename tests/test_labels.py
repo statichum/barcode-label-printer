@@ -18,7 +18,7 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     assert b"9412345678901" not in payload.split(ESC + b"BG02190", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
-    assert ESC + b"V0306" + ESC + b"L0202" + ESC + b"SFXL9301-00067" in payload
+    assert ESC + b"V0306" + ESC + b"L0101" + ESC + b"WBFXL9301-00067" in payload
 
 
 def test_description_is_cut_off_after_three_tightly_spaced_lines(tmp_path):
@@ -36,11 +36,21 @@ def test_description_is_cut_off_after_three_tightly_spaced_lines(tmp_path):
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"H0020" + ESC + b"V0010" + ESC + b"L0101" in payload
-    assert ESC + b"M" + b"A" * 43 in payload
+    assert ESC + b"L0101" + ESC + b"H0020" + ESC + b"V0010" in payload
+    assert payload.count(ESC + b"M" + b"A" * 43) == 2
     assert ESC + b"V0032" + ESC + b"M" + b"B" * 43 in payload
     assert ESC + b"V0054" + ESC + b"M" + b"C" * 43 in payload
     assert b"SHOULD-NOT-PRINT" not in payload
+
+
+def test_long_item_code_uses_a_font_that_preserves_side_margins(tmp_path):
+    config = settings(tmp_path)
+    item_code = "X" * 36
+    item = CatalogItem(item_code, "Example item", "9412345678901")
+
+    payload = build_label(item, 1, config)
+
+    assert ESC + b"L0101" + ESC + b"M" + item_code.encode() in payload
 
 
 def test_text_cannot_inject_sbpl_commands():
