@@ -17,7 +17,8 @@ from .printer import PrinterDiscovery
 ESC = b"\x1b"
 DESCRIPTION_MARGIN_DOTS = 32
 DESCRIPTION_FONT_WIDTH_DOTS = 16
-DESCRIPTION_FONT_HEIGHT_DOTS = 25
+DESCRIPTION_FONT_HEIGHT_DOTS = 45
+DESCRIPTION_LINE_ADVANCE_DOTS = DESCRIPTION_FONT_HEIGHT_DOTS + 1
 ITEM_CODE_MARGIN_DOTS = 32
 
 
@@ -47,10 +48,8 @@ def _description_line(text: str, y: int) -> bytes:
     return (
         _command(f"H{DESCRIPTION_MARGIN_DOTS:04d}")
         + _command(f"V{y:04d}")
-        + _command(
-            f"RDB01,{DESCRIPTION_FONT_WIDTH_DOTS:03d},"
-            f"{DESCRIPTION_FONT_HEIGHT_DOTS:03d},"
-        )
+        + _command("L0203")
+        + _command("S")
         + text.encode("ascii")
     )
 
@@ -112,13 +111,18 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     payload += _command(f"CS{settings.printer_print_speed}")
     payload += _command(f"#E{settings.printer_darkness}")
     payload += _command(f"A1{height:04d}{width:04d}")
-    payload += _description_line(description_lines[0], 8)
+    description_y = 10
+    payload += _description_line(description_lines[0], description_y)
     if len(description_lines) > 1:
-        payload += _description_line(description_lines[1], 34)
+        payload += _description_line(
+            description_lines[1], description_y + DESCRIPTION_LINE_ADVANCE_DOTS
+        )
     if len(description_lines) > 2:
-        payload += _description_line(description_lines[2], 60)
-    payload += _command(f"H{barcode_x:04d}") + _command("V0094")
-    payload += _command(f"BG{barcode_module:02d}190") + b">F" + barcode.encode("ascii")
+        payload += _description_line(
+            description_lines[2], description_y + (DESCRIPTION_LINE_ADVANCE_DOTS * 2)
+        )
+    payload += _command(f"H{barcode_x:04d}") + _command("V0154")
+    payload += _command(f"BG{barcode_module:02d}120") + b">F" + barcode.encode("ascii")
     payload += _command(f"H{item_x:04d}") + _command("V0296")
     payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
     payload += _command(f"Q{quantity}")

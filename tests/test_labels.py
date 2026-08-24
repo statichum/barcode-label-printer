@@ -15,9 +15,9 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     assert payload.startswith(
         ESC + b"A" + ESC + b"CS2" + ESC + b"#E4A" + ESC + b"A103600600"
     )
-    assert ESC + b"RDB01,016,025,Dawnbreaker Frameset - Small" in payload
-    assert ESC + b"BG02190>F9412345678901" in payload
-    assert b"9412345678901" not in payload.split(ESC + b"BG02190", 1)[0]
+    assert ESC + b"L0203" + ESC + b"SDawnbreaker Frameset - Small" in payload
+    assert ESC + b"BG02120>F9412345678901" in payload
+    assert b"9412345678901" not in payload.split(ESC + b"BG02120", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
     assert ESC + b"V0296" + ESC + b"L0303" + ESC + b"SFXL9301-00067" in payload
@@ -38,10 +38,10 @@ def test_description_uses_dot_based_margins_and_three_larger_lines(tmp_path):
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"H0032" + ESC + b"V0008" in payload
-    assert ESC + b"RDB01,016,025," + b"A" * 33 in payload
-    assert ESC + b"V0034" + ESC + b"RDB01,016,025," + b"B" * 33 in payload
-    assert ESC + b"V0060" + ESC + b"RDB01,016,025," + b"C" * 33 in payload
+    assert ESC + b"H0032" + ESC + b"V0010" in payload
+    assert ESC + b"L0203" + ESC + b"S" + b"A" * 33 in payload
+    assert ESC + b"V0056" + ESC + b"L0203" + ESC + b"S" + b"B" * 33 in payload
+    assert ESC + b"V0102" + ESC + b"L0203" + ESC + b"S" + b"C" * 33 in payload
     assert b"SHOULD-NOT-PRINT" not in payload
 
 
