@@ -19,8 +19,7 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     assert ESC + b"BG02120>F9412345678901" in payload
     assert b"9412345678901" not in payload.split(ESC + b"BG02120", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
-    assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
-    assert payload.count(ESC + b"RDB01,028,059,FXL9301-00067") == 2
+    assert payload.index(ESC + b"RDB01,028,059,F") > payload.index(b"9412345678901")
 
 
 def test_description_uses_dot_based_margins_and_three_larger_lines(tmp_path):
@@ -64,24 +63,38 @@ def test_proportional_description_wrap_uses_available_width_for_narrow_text(tmp_
     assert payload.count(ESC + b"RDB01,018,032," + description.encode()) == 2
 
 
-def test_long_item_code_uses_a_font_that_preserves_side_margins(tmp_path):
+def test_long_item_code_uses_a_smaller_smooth_font_to_preserve_margins(tmp_path):
     config = settings(tmp_path)
     item_code = "X" * 36
     item = CatalogItem(item_code, "Example item", "9412345678901")
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"L0101" + ESC + b"M" + item_code.encode() in payload
+    assert payload.count(ESC + b"RDB01,014,030,X") == 72
 
 
-def test_medium_item_code_steps_down_to_preserve_side_margins(tmp_path):
+def test_item_code_digits_use_fixed_pitch_and_are_visually_centered(tmp_path):
     config = settings(tmp_path)
-    item_code = "X" * 25
+    item_code = "TYSSM11159766"
     item = CatalogItem(item_code, "Example item", "9412345678901")
 
     payload = build_label(item, 1, config)
 
-    assert ESC + b"L0202" + ESC + b"S" + item_code.encode() in payload
+    assert ESC + b"H0266" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
+    assert ESC + b"H0294" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
+    assert ESC + b"H0322" + ESC + b"V0282" + ESC + b"RDB01,028,059,1" in payload
+
+
+def test_barcode_moves_up_when_description_uses_fewer_lines(tmp_path):
+    config = settings(tmp_path)
+    one_line = CatalogItem("ITEM-1", "Short description", "9412345678901")
+    three_lines = CatalogItem("ITEM-1", "W" * 84, "9412345678901")
+
+    one_line_payload = build_label(one_line, 1, config)
+    three_line_payload = build_label(three_lines, 1, config)
+
+    assert ESC + b"V0090" + ESC + b"BG02120" in one_line_payload
+    assert ESC + b"V0132" + ESC + b"BG02120" in three_line_payload
 
 
 def test_text_cannot_inject_sbpl_commands():

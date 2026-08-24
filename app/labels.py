@@ -21,6 +21,8 @@ DESCRIPTION_LINE_ADVANCE_DOTS = 35
 ITEM_CODE_MARGIN_DOTS = 32
 ITEM_CODE_PREFERRED_WIDTH_DOTS = 28
 ITEM_CODE_PREFERRED_HEIGHT_DOTS = 59
+ITEM_CODE_BOTTOM_MARGIN_DOTS = 19
+BARCODE_HEIGHT_DOTS = 120
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -113,6 +115,29 @@ def _wrap_proportional_text(
     return lines
 
 
+def _fixed_pitch_smooth_text(
+    value: str,
+    x: int,
+    y: int,
+    cell_width: int,
+    font_width: int,
+    font_height: int,
+) -> bytes:
+    font_command = f"RDB01,{font_width:03d},{font_height:03d},"
+    payload = bytearray()
+    for index, character in enumerate(value):
+        glyph_width = min(
+            font_width, _estimated_character_width(character, font_width)
+        )
+        glyph_x = x + (index * cell_width) + ((cell_width - glyph_width) // 2)
+        encoded = character.encode("ascii")
+        payload += _command(f"H{glyph_x:04d}") + _command(f"V{y:04d}")
+        payload += _command(font_command) + encoded
+        payload += _command(f"H{glyph_x + 1:04d}") + _command(f"V{y:04d}")
+        payload += _command(font_command) + encoded
+    return bytes(payload)
+
+
 def _code128_size(value: str, available_width: int) -> tuple[int, int]:
     # Start, data, checksum and stop symbols. Code Set B uses one symbol per
     # character; every symbol is 11 modules except the 13-module stop symbol.
@@ -150,26 +175,34 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
     item_available_width = width - (ITEM_CODE_MARGIN_DOTS * 2)
-    if (len(item_code) * ITEM_CODE_PREFERRED_WIDTH_DOTS) + 1 <= item_available_width:
-        item_font = "RDB"
-        item_scale = None
-        item_text_width = (len(item_code) * ITEM_CODE_PREFERRED_WIDTH_DOTS) + 1
-    elif len(item_code) * 16 <= item_available_width:
-        item_font = "S"
-        item_scale = "L0202"
-        item_text_width = len(item_code) * 16
-    else:
-        item_font = "M"
-        item_scale = "L0101"
-        item_text_width = len(item_code) * 13
+    item_cell_width = min(
+        ITEM_CODE_PREFERRED_WIDTH_DOTS,
+        (item_available_width - 1) // len(item_code),
+    )
+    item_font_width = item_cell_width
+    item_font_height = round(
+        ITEM_CODE_PREFERRED_HEIGHT_DOTS
+        * (item_font_width / ITEM_CODE_PREFERRED_WIDTH_DOTS)
+    )
+    item_text_width = (len(item_code) * item_cell_width) + 1
     item_x = max(ITEM_CODE_MARGIN_DOTS, (width - item_text_width) // 2)
+    item_y = height - ITEM_CODE_BOTTOM_MARGIN_DOTS - item_font_height
+
+    description_y = 10
+    description_bottom = (
+        description_y
+        + ((len(description_lines) - 1) * DESCRIPTION_LINE_ADVANCE_DOTS)
+        + DESCRIPTION_FONT_HEIGHT_DOTS
+    )
+    available_vertical_gap = item_y - description_bottom - BARCODE_HEIGHT_DOTS
+    barcode_top_gap = max(8, round(available_vertical_gap * 0.4))
+    barcode_y = description_bottom + barcode_top_gap
 
     payload = bytearray()
     payload += _command("A")
     payload += _command(f"CS{settings.printer_print_speed}")
     payload += _command(f"#E{settings.printer_darkness}")
     payload += _command(f"A1{height:04d}{width:04d}")
-    description_y = 10
     payload += _description_line(description_lines[0], description_y)
     if len(description_lines) > 1:
         payload += _description_line(
@@ -179,20 +212,17 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
         payload += _description_line(
             description_lines[2], description_y + (DESCRIPTION_LINE_ADVANCE_DOTS * 2)
         )
-    payload += _command(f"H{barcode_x:04d}") + _command("V0154")
-    payload += _command(f"BG{barcode_module:02d}120") + b">F" + barcode.encode("ascii")
-    item_y = 282
-    payload += _command(f"H{item_x:04d}") + _command(f"V{item_y:04d}")
-    if item_font == "RDB":
-        item_command = (
-            f"RDB01,{ITEM_CODE_PREFERRED_WIDTH_DOTS:03d},"
-            f"{ITEM_CODE_PREFERRED_HEIGHT_DOTS:03d},"
-        )
-        payload += _command(item_command) + item_code.encode("ascii")
-        payload += _command(f"H{item_x + 1:04d}") + _command(f"V{item_y:04d}")
-        payload += _command(item_command) + item_code.encode("ascii")
-    else:
-        payload += _command(item_scale) + _command(item_font) + item_code.encode("ascii")
+    payload += _command(f"H{barcode_x:04d}") + _command(f"V{barcode_y:04d}")
+    payload += _command(f"BG{barcode_module:02d}{BARCODE_HEIGHT_DOTS:03d}")
+    payload += b">F" + barcode.encode("ascii")
+    payload += _fixed_pitch_smooth_text(
+        item_code,
+        x=item_x,
+        y=item_y,
+        cell_width=item_cell_width,
+        font_width=item_font_width,
+        font_height=item_font_height,
+    )
     payload += _command(f"Q{quantity}")
     payload += _command("Z")
     return bytes(payload)
