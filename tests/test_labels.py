@@ -15,22 +15,22 @@ def test_build_label_uses_50_by_30_mm_at_305_dpi(tmp_path):
     assert payload.startswith(
         ESC + b"A" + ESC + b"CS2" + ESC + b"#E4A" + ESC + b"A103600600"
     )
-    assert payload.count(ESC + b"RDB01,016,028,Dawnbreaker Frameset - Small") == 2
+    assert payload.count(ESC + b"RDB01,018,032,Dawnbreaker Frameset - Small") == 2
     assert ESC + b"BG02120>F9412345678901" in payload
     assert b"9412345678901" not in payload.split(ESC + b"BG02120", 1)[0]
     assert ESC + b"Q3" + ESC + b"Z" in payload
     assert payload.index(b"FXL9301-00067") > payload.index(b"9412345678901")
-    assert payload.count(ESC + b"RDB01,023,049,FXL9301-00067") == 2
+    assert payload.count(ESC + b"RDB01,028,059,FXL9301-00067") == 2
 
 
 def test_description_uses_dot_based_margins_and_three_larger_lines(tmp_path):
     config = settings(tmp_path)
     description = (
-        "A" * 28
+        "W" * 28
         + " "
-        + "B" * 28
+        + "W" * 28
         + " "
-        + "C" * 28
+        + "W" * 28
         + " "
         + "SHOULD-NOT-PRINT"
     )
@@ -39,9 +39,9 @@ def test_description_uses_dot_based_margins_and_three_larger_lines(tmp_path):
     payload = build_label(item, 1, config)
 
     assert ESC + b"H0040" + ESC + b"V0010" in payload
-    assert payload.count(ESC + b"RDB01,016,028," + b"A" * 28) == 2
-    assert ESC + b"V0041" + ESC + b"RDB01,016,028," + b"B" * 28 in payload
-    assert ESC + b"V0072" + ESC + b"RDB01,016,028," + b"C" * 28 in payload
+    assert payload.count(ESC + b"RDB01,018,032," + b"W" * 28) == 6
+    assert ESC + b"V0045" + ESC + b"RDB01,018,032," + b"W" * 28 in payload
+    assert ESC + b"V0080" + ESC + b"RDB01,018,032," + b"W" * 28 in payload
     assert b"SHOULD-NOT-PRINT" not in payload
 
 
@@ -52,6 +52,16 @@ def test_invalid_print_quality_settings_are_rejected(tmp_path):
         build_label(item, 1, settings(tmp_path, printer_print_speed=5))
     with pytest.raises(ValueError, match="PRINTER_DARKNESS"):
         build_label(item, 1, settings(tmp_path, printer_darkness="6A"))
+
+
+def test_proportional_description_wrap_uses_available_width_for_narrow_text(tmp_path):
+    config = settings(tmp_path)
+    description = "i" * 60
+    item = CatalogItem("ITEM-1", description, "9412345678901")
+
+    payload = build_label(item, 1, config)
+
+    assert payload.count(ESC + b"RDB01,018,032," + description.encode()) == 2
 
 
 def test_long_item_code_uses_a_font_that_preserves_side_margins(tmp_path):

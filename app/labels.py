@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import socket
-import textwrap
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,13 +15,12 @@ from .printer import PrinterDiscovery
 
 ESC = b"\x1b"
 DESCRIPTION_MARGIN_DOTS = 40
-DESCRIPTION_CHARACTER_PITCH_DOTS = 18
-DESCRIPTION_FONT_WIDTH_DOTS = 16
-DESCRIPTION_FONT_HEIGHT_DOTS = 28
-DESCRIPTION_LINE_ADVANCE_DOTS = 31
+DESCRIPTION_FONT_WIDTH_DOTS = 18
+DESCRIPTION_FONT_HEIGHT_DOTS = 32
+DESCRIPTION_LINE_ADVANCE_DOTS = 35
 ITEM_CODE_MARGIN_DOTS = 32
-ITEM_CODE_PREFERRED_WIDTH_DOTS = 23
-ITEM_CODE_PREFERRED_HEIGHT_DOTS = 49
+ITEM_CODE_PREFERRED_WIDTH_DOTS = 28
+ITEM_CODE_PREFERRED_HEIGHT_DOTS = 59
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -65,6 +63,56 @@ def _description_line(text: str, y: int) -> bytes:
     )
 
 
+def _estimated_character_width(character: str, font_width: int) -> int:
+    if character in " .,:;!|iIl1'`":
+        factor = 0.35
+    elif character in "MW@%&QO0":
+        factor = 1.0
+    elif character.isupper():
+        factor = 0.72
+    elif character.isdigit():
+        factor = 0.62
+    else:
+        factor = 0.56
+    return max(1, round(font_width * factor))
+
+
+def _estimated_text_width(value: str, font_width: int) -> int:
+    return sum(_estimated_character_width(character, font_width) for character in value)
+
+
+def _wrap_proportional_text(
+    value: str, available_width: int, font_width: int, max_lines: int
+) -> list[str]:
+    lines: list[str] = []
+    remaining = value.strip()
+    while remaining and len(lines) < max_lines:
+        if _estimated_text_width(remaining, font_width) <= available_width:
+            lines.append(remaining)
+            break
+
+        width = 0
+        last_space = -1
+        cut = 0
+        for index, character in enumerate(remaining):
+            character_width = _estimated_character_width(character, font_width)
+            if width + character_width > available_width:
+                break
+            width += character_width
+            cut = index + 1
+            if character == " ":
+                last_space = index
+
+        if last_space > 0:
+            lines.append(remaining[:last_space].rstrip())
+            remaining = remaining[last_space + 1 :].lstrip()
+        else:
+            cut = max(1, cut)
+            lines.append(remaining[:cut].rstrip())
+            remaining = remaining[cut:].lstrip()
+    return lines
+
+
 def _code128_size(value: str, available_width: int) -> tuple[int, int]:
     # Start, data, checksum and stop symbols. Code Set B uses one symbol per
     # character; every symbol is 11 modules except the 13-module stop symbol.
@@ -91,14 +139,13 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     if settings.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
         raise ValueError("PRINTER_DARKNESS must be between 1A and 5A")
 
-    description_width = width - (DESCRIPTION_MARGIN_DOTS * 2)
-    description_chars = description_width // DESCRIPTION_CHARACTER_PITCH_DOTS
-    description_lines = textwrap.wrap(
+    description_width = width - (DESCRIPTION_MARGIN_DOTS * 2) - 1
+    description_lines = _wrap_proportional_text(
         description,
-        width=description_chars,
-        break_long_words=True,
-        break_on_hyphens=True,
-    )[:3] or [item_code]
+        available_width=description_width,
+        font_width=DESCRIPTION_FONT_WIDTH_DOTS,
+        max_lines=3,
+    ) or [item_code]
 
     barcode_module, barcode_width = _code128_size(barcode, width - 64)
     barcode_x = max(32, (width - barcode_width) // 2)
@@ -134,7 +181,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
         )
     payload += _command(f"H{barcode_x:04d}") + _command("V0154")
     payload += _command(f"BG{barcode_module:02d}120") + b">F" + barcode.encode("ascii")
-    item_y = 290
+    item_y = 282
     payload += _command(f"H{item_x:04d}") + _command(f"V{item_y:04d}")
     if item_font == "RDB":
         item_command = (
