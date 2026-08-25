@@ -9,7 +9,7 @@
       name="description"
       content="Look up purchase orders and print product barcode labels."
     />
-    <link rel="stylesheet" href="/static/styles.css?v=15" />
+    <link rel="stylesheet" href="/static/styles.css?v=16" />
   </head>
   <body>
     <header class="topbar">
@@ -225,7 +225,7 @@
         <p>Use the current <b>QtyAvailable</b> in the <b>MAIN</b> warehouse. Quantities will open in the normal label list for review before printing.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
-          <span><b>Checking MAIN available stock…</b><small>MYOB is returning the current warehouse availability.</small></span>
+          <span><b>Checking MAIN available stock…</b><small>MYOB returns the full warehouse dataset, so this can take a minute or two.</small></span>
         </div>
         <p id="stock-label-error" class="write-warning" hidden></p>
         <div class="dialog-actions">
@@ -236,6 +236,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=15" defer></script>
+    <script src="/static/app.js?v=16" defer></script>
   </body>
 </html>

@@ -470,15 +470,21 @@ class MyobClient:
             if code and code.strip()
         }
         quantities = {code: 0 for code in selected}
-        response = self._authenticated_request(
-            "PUT",
-            f"{self.settings.myob_api_root}/WebNinjaInventory",
-            params={"$expand": "Result"},
-            json={"Result": []},
-        )
         try:
+            availability_timeout = max(self.settings.myob_timeout_seconds, 180)
+            response = self._authenticated_request(
+                "PUT",
+                f"{self.settings.myob_api_root}/WebNinjaInventory",
+                params={"$expand": "Result"},
+                json={"Result": []},
+                timeout=availability_timeout,
+            )
             response.raise_for_status()
             payload = response.json()
+        except httpx.TimeoutException as exc:
+            raise MyobError(
+                "MYOB stock availability took longer than three minutes; try again"
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise MyobError("MYOB did not return valid MAIN stock availability") from exc
         result = payload.get("Result") if isinstance(payload, dict) else None

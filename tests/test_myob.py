@@ -416,4 +416,23 @@ def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(
     assert request.method == "PUT"
     assert request.url.path.endswith("/WebNinjaInventory")
     assert request.url.params["$expand"] == "Result"
+    assert request.extensions["timeout"]["read"] == 180.0
     assert request.read().decode() == '{"Result":[]}'
+
+
+def test_main_qty_available_reports_slow_myob_timeout(tmp_path):
+    def handler(request):
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        raise httpx.ReadTimeout("slow WebNinjaInventory", request=request)
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(MyobError, match="longer than three minutes"):
+        client.get_main_qty_available(["NEW1"])
+    client._client.close()
