@@ -11,6 +11,7 @@ const state = {
   assignmentSelected: new Set(),
   assignmentPreview: null,
   assignmentStoredAt: null,
+  lastAssignedItems: [],
 };
 
 const elements = {
@@ -47,6 +48,7 @@ const elements = {
   assignLoading: document.querySelector("#assign-loading"),
   assignLoadingTitle: document.querySelector("#assign-loading-title"),
   refreshAssignItems: document.querySelector("#refresh-assign-items"),
+  selectVisibleAssignItems: document.querySelector("#select-visible-assign-items"),
   assignCount: document.querySelector("#assign-count"),
   reviewAssignments: document.querySelector("#review-assignments"),
   assignPinDialog: document.querySelector("#assign-pin-dialog"),
@@ -54,6 +56,11 @@ const elements = {
   assignmentPreviewList: document.querySelector("#assignment-preview-list"),
   assignmentWriteWarning: document.querySelector("#assignment-write-warning"),
   commitAssignments: document.querySelector("#commit-assignments"),
+  assignmentCompleteDialog: document.querySelector("#assignment-complete-dialog"),
+  assignmentCompleteSummary: document.querySelector("#assignment-complete-summary"),
+  prepareStockLabels: document.querySelector("#prepare-stock-labels"),
+  stockLabelProgress: document.querySelector("#stock-label-progress"),
+  stockLabelError: document.querySelector("#stock-label-error"),
 };
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -174,6 +181,8 @@ function renderResults({ title, kicker, meta }) {
 
     if (!item.printable) {
       barcodeCell.classList.add("missing");
+    }
+    if (item.warning || !item.printable) {
       warning.textContent = item.warning || "This item cannot be printed";
       warning.hidden = false;
     }
@@ -424,6 +433,14 @@ function updateAssignmentSummary() {
   elements.reviewAssignments.disabled = state.busy || count === 0;
 }
 
+function visibleAssignmentItems() {
+  const query = elements.assignSearch.value.trim().toLocaleLowerCase();
+  return state.assignmentItems
+    .filter((item) => assignmentMatches(item, query))
+    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code))
+    .slice(0, 250);
+}
+
 function renderAssignmentItems() {
   const query = elements.assignSearch.value.trim().toLocaleLowerCase();
   const matches = state.assignmentItems
@@ -550,6 +567,12 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
 elements.assignSearch.addEventListener("input", renderAssignmentItems);
 elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
 elements.refreshAssignItems.addEventListener("click", () => loadAssignmentItems(true));
+elements.selectVisibleAssignItems.addEventListener("click", () => {
+  for (const item of visibleAssignmentItems()) {
+    if (item.assignable) state.assignmentSelected.add(item.item_code);
+  }
+  renderAssignmentItems();
+});
 document.querySelector("#clear-assign-selection").addEventListener("click", () => {
   state.assignmentSelected.clear();
   renderAssignmentItems();
@@ -600,6 +623,10 @@ elements.commitAssignments.addEventListener("click", async () => {
     state.assignmentPreview = null;
     renderAssignmentItems();
     showToast(`${result.count} barcode${result.count === 1 ? "" : "s"} assigned in MYOB.`);
+    state.lastAssignedItems = result.assigned;
+    elements.assignmentCompleteSummary.textContent = `${result.count} barcode${result.count === 1 ? " was" : "s were"} assigned successfully.`;
+    elements.stockLabelError.hidden = true;
+    if (!elements.assignmentCompleteDialog.open) elements.assignmentCompleteDialog.showModal();
   } catch (error) {
     if (error.status === 401) {
       elements.assignmentPreviewDialog.close();
@@ -610,6 +637,59 @@ elements.commitAssignments.addEventListener("click", async () => {
     state.busy = false;
     if (state.assignmentPreview) renderAssignmentPreview(state.assignmentPreview);
     updateAssignmentSummary();
+  }
+});
+
+function closeAssignmentCompleteDialog() {
+  if (elements.assignmentCompleteDialog.open) elements.assignmentCompleteDialog.close();
+}
+
+document.querySelector("#assignment-complete-close").addEventListener("click", closeAssignmentCompleteDialog);
+document.querySelector("#assignment-complete-done").addEventListener("click", closeAssignmentCompleteDialog);
+elements.prepareStockLabels.addEventListener("click", async () => {
+  if (!state.lastAssignedItems.length || state.busy) return;
+  state.busy = true;
+  clearMessage();
+  elements.stockLabelError.hidden = true;
+  elements.stockLabelProgress.hidden = false;
+  elements.prepareStockLabels.disabled = true;
+  elements.prepareStockLabels.textContent = "Checking MAIN stock…";
+  try {
+    const response = await api("/api/barcode-admin/stock-labels", {
+      method: "POST",
+      barcodeAdmin: true,
+      body: JSON.stringify({ item_codes: state.lastAssignedItems.map((item) => item.item_code) }),
+    });
+    closeAssignmentCompleteDialog();
+    if (!response.items.length) {
+      elements.results.hidden = true;
+      showMessage("None of the newly assigned items currently has QtyAvailable in MAIN.", "info");
+      return;
+    }
+    state.items = response.items;
+    state.resultMode = "stock";
+    state.sortMode = "natural";
+    state.reference = "MAIN stock after barcode assignment";
+    applyResultSort();
+    const zeroCopy = response.zero_stock.length
+      ? ` · ${response.zero_stock.length} with no available stock`
+      : "";
+    renderResults({
+      kicker: "MAIN AVAILABLE STOCK",
+      title: "New barcode labels",
+      meta: `${response.items.length} item${response.items.length === 1 ? "" : "s"} ready${zeroCopy}`,
+    });
+    elements.results.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    elements.stockLabelError.textContent = error.message;
+    elements.stockLabelError.hidden = false;
+  } finally {
+    state.busy = false;
+    elements.stockLabelProgress.hidden = true;
+    elements.prepareStockLabels.disabled = false;
+    elements.prepareStockLabels.textContent = "Prepare MAIN stock labels";
+    updateAssignmentSummary();
+    updateSummary();
   }
 });
 

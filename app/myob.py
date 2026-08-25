@@ -409,6 +409,39 @@ class MyobClient:
     def list_active_stock_items(self) -> list[dict]:
         return self.list_stock_items(active_only=True)
 
+    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
+        selected = {
+            code.strip().upper()
+            for code in item_codes
+            if code and code.strip()
+        }
+        quantities = {code: 0 for code in selected}
+        response = self._authenticated_request(
+            "PUT",
+            f"{self.settings.myob_api_root}/WebNinjaInventory",
+            params={"$expand": "Result"},
+            json={"Result": []},
+        )
+        try:
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise MyobError("MYOB did not return valid MAIN stock availability") from exc
+        result = payload.get("Result") if isinstance(payload, dict) else None
+        if not isinstance(result, list):
+            raise MyobError("MYOB did not return valid MAIN stock availability")
+        for row in result:
+            code = str(_value(row, "InventoryID", "") or "").strip().upper()
+            warehouse = str(_value(row, "Warehouse", "") or "").strip().upper()
+            if code not in selected or warehouse != "MAIN":
+                continue
+            try:
+                available = Decimal(str(_value(row, "QtyAvailable", 0) or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            quantities[code] += max(0, int(available))
+        return quantities
+
     def assign_barcode(
         self,
         item_code: str,

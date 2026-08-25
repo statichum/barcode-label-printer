@@ -339,3 +339,53 @@ def test_barcode_assignment_put_creates_row_when_none_exists(tmp_path):
         '{"AlternateID":{"value":"0400000000015"},'
         '"AlternateType":{"value":"Barcode"},"UOM":{"value":"EACH"}}]}'
     )
+
+
+def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(
+    tmp_path,
+):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "Result": [
+                    {
+                        "InventoryID": field("NEW1"),
+                        "Warehouse": field("MAIN"),
+                        "QtyAvailable": field(12),
+                    },
+                    {
+                        "InventoryID": field("NEW1"),
+                        "Warehouse": field("INTR"),
+                        "QtyAvailable": field(99),
+                    },
+                    {
+                        "InventoryID": field("OTHER"),
+                        "Warehouse": field("MAIN"),
+                        "QtyAvailable": field(50),
+                    },
+                ]
+            },
+        )
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    quantities = client.get_main_qty_available(["new1", "missing"])
+    client._client.close()
+
+    assert quantities == {"NEW1": 12, "MISSING": 0}
+    request = requests[-1]
+    assert request.method == "PUT"
+    assert request.url.path.endswith("/WebNinjaInventory")
+    assert request.url.params["$expand"] == "Result"
+    assert request.read().decode() == '{"Result":[]}'

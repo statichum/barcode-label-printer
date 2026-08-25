@@ -9,7 +9,7 @@
       name="description"
       content="Look up purchase orders and print product barcode labels."
     />
-    <link rel="stylesheet" href="/static/styles.css?v=13" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
   </head>
   <body>
     <header class="topbar">
@@ -104,7 +104,10 @@
             </div>
             <div class="assign-heading">
               <p id="assign-meta">Loading active stock items…</p>
-              <button id="clear-assign-selection" class="text-button" type="button">Clear selection</button>
+              <div class="assign-selection-actions">
+                <button id="select-visible-assign-items" class="text-button" type="button">Select all visible</button>
+                <button id="clear-assign-selection" class="text-button" type="button">Clear selection</button>
+              </div>
             </div>
             <div id="assign-loading" class="assign-loading" role="status" aria-live="polite" hidden>
               <span class="loading-spinner" aria-hidden="true"></span>
@@ -213,7 +216,26 @@
       </div>
     </dialog>
 
+    <dialog id="assignment-complete-dialog" class="dialog">
+      <div class="dialog-card">
+        <button id="assignment-complete-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">BARCODES ASSIGNED</p>
+        <h2>Prepare stock labels?</h2>
+        <p id="assignment-complete-summary"></p>
+        <p>Use the current <b>QtyAvailable</b> in the <b>MAIN</b> warehouse. Quantities will open in the normal label list for review before printing.</p>
+        <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
+          <span class="loading-spinner" aria-hidden="true"></span>
+          <span><b>Checking MAIN available stock…</b><small>MYOB is returning the current warehouse availability.</small></span>
+        </div>
+        <p id="stock-label-error" class="write-warning" hidden></p>
+        <div class="dialog-actions">
+          <button id="prepare-stock-labels" class="primary-button" type="button">Prepare MAIN stock labels</button>
+          <button id="assignment-complete-done" class="secondary-button" type="button">Done</button>
+        </div>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=13" defer></script>
+    <script src="/static/app.js?v=14" defer></script>
   </body>
 </html>

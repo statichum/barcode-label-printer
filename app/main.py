@@ -52,7 +52,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.2.1",
+    version="1.3.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -166,13 +166,17 @@ def load_assignment_catalog(refresh: bool = False) -> tuple[list[dict], float]:
             stored = _read_stored_assignment_catalog()
             if stored is not None:
                 items, stored_at = stored
+                active_items = [item for item in items if item.get("status") == "Active"]
+                if len(active_items) != len(items):
+                    _write_stored_assignment_catalog(active_items, stored_at)
+                items = active_items
                 _set_assignment_catalog(items, stored_at)
                 logger.info("Loaded %s stock items from the stored catalogue", len(items))
                 return items, stored_at
 
         items = [
             _stored_assignment_item(item)
-            for item in myob.list_stock_items(active_only=False)
+            for item in myob.list_active_stock_items()
         ]
         stored_at = time.time()
         _write_stored_assignment_catalog(items, stored_at)
@@ -357,6 +361,58 @@ def commit_barcode_assignments(
     update_stored_assignment_catalog(verified)
     logger.info("Assigned MYOB barcodes to %s item(s)", len(assigned))
     return {"assigned": assigned, "count": len(assigned)}
+
+
+@app.post("/api/barcode-admin/stock-labels")
+def barcode_assignment_stock_labels(
+    request: BarcodeAssignmentPreviewRequest,
+    authorization: str | None = Header(default=None),
+):
+    require_barcode_admin(authorization)
+    catalogue, _ = load_assignment_catalog()
+    by_code = {item["item_code"].upper(): item for item in catalogue}
+    try:
+        quantities = myob.get_main_qty_available(request.item_codes)
+    except MyobError as exc:
+        logger.warning("MYOB MAIN stock availability lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    items = []
+    zero_stock = []
+    limited = []
+    for code in request.item_codes:
+        item = by_code.get(code.upper())
+        if not item:
+            continue
+        available = max(0, quantities.get(code.upper(), 0))
+        if available <= 0:
+            zero_stock.append(item["item_code"])
+            continue
+        quantity = min(available, 999)
+        if available > 999:
+            limited.append(item["item_code"])
+        items.append(
+            {
+                "item_code": item["item_code"],
+                "description": item["description"],
+                "barcode": item.get("barcode"),
+                "quantity": quantity,
+                "qty_available": available,
+                "selected": bool(item.get("barcode")),
+                "printable": bool(item.get("barcode")),
+                "warning": (
+                    f"MAIN QtyAvailable is {available}; label quantity is limited to 999"
+                    if available > 999
+                    else None
+                ),
+            }
+        )
+    return {
+        "warehouse": "MAIN",
+        "items": items,
+        "zero_stock": zero_stock,
+        "limited": limited,
+    }
 
 
 @app.get("/api/printer/status")

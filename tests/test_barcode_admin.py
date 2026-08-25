@@ -55,7 +55,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
             barcode_reference_value="x",
         ),
     ]
-    myob.list_stock_items.return_value = catalog
+    myob.list_active_stock_items.return_value = catalog
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     main.barcode_admin_sessions.clear()
@@ -96,7 +96,26 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     myob.assign_barcode.assert_called_once_with(
         "NEW", assignment["barcode"], "placeholder-xref"
     )
-    myob.list_stock_items.assert_called_once_with(active_only=False)
+    myob.list_active_stock_items.assert_called_once_with()
+
+    myob.get_main_qty_available.return_value = {"NEW": 7}
+    stock_labels = client.post(
+        "/api/barcode-admin/stock-labels",
+        headers=headers,
+        json={"item_codes": ["NEW"]},
+    )
+
+    assert stock_labels.status_code == 200
+    assert stock_labels.json()["items"][0] == {
+        "item_code": "NEW",
+        "description": "Description for NEW",
+        "barcode": assignment["barcode"],
+        "quantity": 7,
+        "qty_available": 7,
+        "selected": True,
+        "printable": True,
+        "warning": None,
+    }
 
 
 def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):
@@ -113,7 +132,7 @@ def test_assignment_catalog_is_stored_and_reused_after_memory_is_cleared(
 ):
     configured = settings(tmp_path)
     myob = MagicMock()
-    myob.list_stock_items.return_value = [
+    myob.list_active_stock_items.return_value = [
         stock_item("NEW", barcode_reference_id="placeholder", barcode_reference_value="x")
     ]
     monkeypatch.setattr(main, "settings", configured)
@@ -125,15 +144,15 @@ def test_assignment_catalog_is_stored_and_reused_after_memory_is_cleared(
     assert first_items[0]["item_code"] == "NEW"
     assert first_items[0]["barcode_reference_value"] == "x"
     assert (configured.data_dir / "barcode-stock-items.json").is_file()
-    myob.list_stock_items.assert_called_once_with(active_only=False)
+    myob.list_active_stock_items.assert_called_once_with()
 
     reset_barcode_catalog()
-    myob.list_stock_items.reset_mock()
+    myob.list_active_stock_items.reset_mock()
     second_items, second_stored_at = main.load_assignment_catalog()
 
     assert second_items == first_items
     assert second_stored_at == first_stored_at
-    myob.list_stock_items.assert_not_called()
+    myob.list_active_stock_items.assert_not_called()
 
 
 def test_overlapping_catalog_refreshes_share_one_myob_load(tmp_path, monkeypatch):
@@ -142,13 +161,12 @@ def test_overlapping_catalog_refreshes_share_one_myob_load(tmp_path, monkeypatch
     started = threading.Event()
     release = threading.Event()
 
-    def slow_load(*, active_only):
-        assert active_only is False
+    def slow_load():
         started.set()
         assert release.wait(timeout=2)
         return [stock_item("NEW")]
 
-    myob.list_stock_items.side_effect = slow_load
+    myob.list_active_stock_items.side_effect = slow_load
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     reset_barcode_catalog()
@@ -170,6 +188,6 @@ def test_overlapping_catalog_refreshes_share_one_myob_load(tmp_path, monkeypatch
 
     assert not first.is_alive()
     assert not second.is_alive()
-    assert myob.list_stock_items.call_count == 1
+    assert myob.list_active_stock_items.call_count == 1
     assert len(results) == 2
     assert results[0] == results[1]
