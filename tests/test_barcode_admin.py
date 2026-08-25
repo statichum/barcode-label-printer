@@ -78,14 +78,23 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     assert assignment["previous_barcode"] == "x"
     assert assignment["cross_reference_id"] == "placeholder-xref"
 
-    myob.get_assignment_stock_items.return_value = {
-        "NEW": stock_item(
-            "NEW",
-            barcode=assignment["barcode"],
-            barcode_reference_id="new-placeholder-xref",
-            barcode_reference_value=assignment["barcode"],
-        )
-    }
+    current_item = stock_item(
+        "NEW",
+        barcode_reference_id="fresh-placeholder-xref",
+        barcode_reference_value="x",
+    )
+    updated_item = stock_item(
+        "NEW",
+        barcode=assignment["barcode"],
+        barcode_reference_id="assigned-xref",
+        barcode_reference_value=assignment["barcode"],
+    )
+    myob.get_assignment_stock_items.side_effect = [
+        {"NEW": current_item},
+        {
+            "NEW": updated_item,
+        },
+    ]
     committed = client.post(
         "/api/barcode-admin/assignments/commit",
         headers=headers,
@@ -94,7 +103,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
 
     assert committed.status_code == 200
     myob.assign_barcode.assert_called_once_with(
-        "NEW", assignment["barcode"], "placeholder-xref"
+        "NEW", assignment["barcode"], "fresh-placeholder-xref"
     )
     myob.list_active_stock_items.assert_called_once_with()
 

@@ -1,8 +1,10 @@
 import httpx
+import pytest
 
 from app.database import CatalogItem
 from app.myob import (
     MyobClient,
+    MyobError,
     ean13_internal_barcode,
     internal_barcode_sequence,
     merge_catalog_items,
@@ -339,6 +341,32 @@ def test_barcode_assignment_put_creates_row_when_none_exists(tmp_path):
         '{"AlternateID":{"value":"0400000000015"},'
         '"AlternateType":{"value":"Barcode"},"UOM":{"value":"EACH"}}]}'
     )
+
+
+def test_barcode_assignment_error_includes_myob_inner_exception(tmp_path):
+    def handler(request):
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        return httpx.Response(
+            500,
+            json={
+                "exceptionMessage": "Operation failed",
+                "innerException": {
+                    "exceptionMessage": "The Barcode detail entity ID cannot be found"
+                },
+            },
+        )
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(MyobError, match="Barcode detail entity ID cannot be found"):
+        client.assign_barcode("NEW1", "0400000000015", "stale-xref")
+    client._client.close()
 
 
 def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(

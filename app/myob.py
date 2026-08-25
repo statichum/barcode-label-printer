@@ -35,6 +35,21 @@ def _odata_string(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _response_error_detail(response: httpx.Response) -> str | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    inner = payload.get("innerException")
+    if isinstance(inner, dict) and inner.get("exceptionMessage"):
+        return str(inner["exceptionMessage"])
+    if payload.get("exceptionMessage"):
+        return str(payload["exceptionMessage"])
+    return None
+
+
 def _label_quantity(value) -> int:
     try:
         quantity = Decimal(str(value))
@@ -279,6 +294,45 @@ def validate_barcode_assignments(assignments: list[dict], stock_items: list[dict
         proposed.add(barcode)
 
 
+def refresh_barcode_assignment_targets(
+    assignments: list[dict], current_items: dict[str, dict]
+) -> list[dict]:
+    refreshed = []
+    for assignment in assignments:
+        code = assignment["item_code"].upper()
+        item = current_items.get(code)
+        if not item:
+            raise BarcodeAssignmentConflict(
+                f"{assignment['item_code']} was not found in the final MYOB check"
+            )
+        if item.get("status") not in {"", "Active"}:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} is no longer an active stock item"
+            )
+        if item.get("barcode_reference_count", 0) > 1:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} now has multiple Barcode rows"
+            )
+
+        preview_value = str(assignment.get("previous_barcode") or "").strip()
+        current_value = str(item.get("barcode_reference_value") or "").strip()
+        preview_missing = not preview_value or preview_value.lower() == "x"
+        current_missing = not current_value or current_value.lower() == "x"
+        if preview_value != current_value and not (preview_missing and current_missing):
+            raise BarcodeAssignmentConflict(
+                f"The barcode for {item['item_code']} changed after preview"
+            )
+
+        updated = dict(assignment)
+        updated["action"] = (
+            "replace" if item.get("barcode_reference_id") else "create"
+        )
+        updated["previous_barcode"] = item.get("barcode_reference_value")
+        updated["cross_reference_id"] = item.get("barcode_reference_id")
+        refreshed.append(updated)
+    return refreshed
+
+
 @dataclass
 class MyobClient:
     settings: Settings
@@ -471,8 +525,11 @@ class MyobClient:
         try:
             response.raise_for_status()
         except httpx.HTTPError as exc:
+            detail = _response_error_detail(response)
+            suffix = f": {detail}" if detail else ""
             raise MyobError(
-                f"MYOB rejected barcode {barcode} for {item_code} with HTTP {response.status_code}"
+                f"MYOB rejected barcode {barcode} for {item_code} "
+                f"with HTTP {response.status_code}{suffix}"
             ) from exc
 
     def _authenticated_request(self, method: str, path: str, **kwargs):

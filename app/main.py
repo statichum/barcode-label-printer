@@ -33,6 +33,7 @@ from .myob import (
     merge_catalog_items,
     merge_purchase_order,
     plan_barcode_assignments,
+    refresh_barcode_assignment_targets,
     validate_barcode_assignments,
 )
 from .printer import PrinterDiscovery, PrinterUnavailable
@@ -52,7 +53,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.3.0",
+    version="1.3.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -320,7 +321,15 @@ def commit_barcode_assignments(
     assignments = preview["assignments"]
     try:
         all_items, _ = load_assignment_catalog()
-        validate_barcode_assignments(assignments, all_items)
+        current_items = myob.get_assignment_stock_items(
+            [item["item_code"] for item in assignments]
+        )
+        assignments = refresh_barcode_assignment_targets(assignments, current_items)
+        validation_items = [
+            current_items.get(item["item_code"].upper(), item)
+            for item in all_items
+        ]
+        validate_barcode_assignments(assignments, validation_items)
     except BarcodeAssignmentConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MyobError as exc:

@@ -628,11 +628,12 @@ elements.commitAssignments.addEventListener("click", async () => {
     elements.stockLabelError.hidden = true;
     if (!elements.assignmentCompleteDialog.open) elements.assignmentCompleteDialog.showModal();
   } catch (error) {
+    elements.assignmentPreviewDialog.close();
+    state.assignmentPreview = null;
     if (error.status === 401) {
-      elements.assignmentPreviewDialog.close();
       showAssignmentAccess();
     }
-    showMessage(error.message);
+    showMessage(`${error.message} Review the assignments again before retrying.`);
   } finally {
     state.busy = false;
     if (state.assignmentPreview) renderAssignmentPreview(state.assignmentPreview);
