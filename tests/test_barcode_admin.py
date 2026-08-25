@@ -1,11 +1,19 @@
+import threading
+import time
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from app import main
-from app.database import CatalogItem
 from app.myob import ean13_internal_barcode
 from tests.helpers import settings
+
+
+def reset_barcode_catalog():
+    with main.barcode_admin_lock:
+        main.barcode_catalog_cache.update(
+            {"items": None, "stored_at": None, "generation": 0}
+        )
 
 
 def stock_item(
@@ -52,6 +60,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     monkeypatch.setattr(main, "myob", myob)
     main.barcode_admin_sessions.clear()
     main.barcode_assignment_previews.clear()
+    reset_barcode_catalog()
 
     client = TestClient(main.app)
     login = client.post("/api/barcode-admin/login", json={"pin": "2468"})
@@ -69,8 +78,13 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     assert assignment["previous_barcode"] == "x"
     assert assignment["cross_reference_id"] == "placeholder-xref"
 
-    myob.get_stock_items.return_value = {
-        "NEW": CatalogItem("NEW", "Description for NEW", assignment["barcode"])
+    myob.get_assignment_stock_items.return_value = {
+        "NEW": stock_item(
+            "NEW",
+            barcode=assignment["barcode"],
+            barcode_reference_id="new-placeholder-xref",
+            barcode_reference_value=assignment["barcode"],
+        )
     }
     committed = client.post(
         "/api/barcode-admin/assignments/commit",
@@ -82,6 +96,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     myob.assign_barcode.assert_called_once_with(
         "NEW", assignment["barcode"], "placeholder-xref"
     )
+    myob.list_stock_items.assert_called_once_with(active_only=False)
 
 
 def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):
@@ -91,3 +106,70 @@ def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):
     response = client.post("/api/barcode-admin/login", json={"pin": "9999"})
 
     assert response.status_code == 401
+
+
+def test_assignment_catalog_is_stored_and_reused_after_memory_is_cleared(
+    tmp_path, monkeypatch
+):
+    configured = settings(tmp_path)
+    myob = MagicMock()
+    myob.list_stock_items.return_value = [
+        stock_item("NEW", barcode_reference_id="placeholder", barcode_reference_value="x")
+    ]
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    reset_barcode_catalog()
+
+    first_items, first_stored_at = main.load_assignment_catalog()
+
+    assert first_items[0]["item_code"] == "NEW"
+    assert first_items[0]["barcode_reference_value"] == "x"
+    assert (configured.data_dir / "barcode-stock-items.json").is_file()
+    myob.list_stock_items.assert_called_once_with(active_only=False)
+
+    reset_barcode_catalog()
+    myob.list_stock_items.reset_mock()
+    second_items, second_stored_at = main.load_assignment_catalog()
+
+    assert second_items == first_items
+    assert second_stored_at == first_stored_at
+    myob.list_stock_items.assert_not_called()
+
+
+def test_overlapping_catalog_refreshes_share_one_myob_load(tmp_path, monkeypatch):
+    configured = settings(tmp_path)
+    myob = MagicMock()
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_load(*, active_only):
+        assert active_only is False
+        started.set()
+        assert release.wait(timeout=2)
+        return [stock_item("NEW")]
+
+    myob.list_stock_items.side_effect = slow_load
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    reset_barcode_catalog()
+    results = []
+
+    first = threading.Thread(
+        target=lambda: results.append(main.load_assignment_catalog(refresh=True))
+    )
+    second = threading.Thread(
+        target=lambda: results.append(main.load_assignment_catalog(refresh=True))
+    )
+    first.start()
+    assert started.wait(timeout=2)
+    second.start()
+    time.sleep(0.05)
+    release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert myob.list_stock_items.call_count == 1
+    assert len(results) == 2
+    assert results[0] == results[1]

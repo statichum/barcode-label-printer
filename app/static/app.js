@@ -10,6 +10,7 @@ const state = {
   assignmentItems: [],
   assignmentSelected: new Set(),
   assignmentPreview: null,
+  assignmentStoredAt: null,
 };
 
 const elements = {
@@ -43,6 +44,9 @@ const elements = {
   assignMissingOnly: document.querySelector("#assign-missing-only"),
   assignMeta: document.querySelector("#assign-meta"),
   assignItemList: document.querySelector("#assign-item-list"),
+  assignLoading: document.querySelector("#assign-loading"),
+  assignLoadingTitle: document.querySelector("#assign-loading-title"),
+  refreshAssignItems: document.querySelector("#refresh-assign-items"),
   assignCount: document.querySelector("#assign-count"),
   reviewAssignments: document.querySelector("#review-assignments"),
   assignPinDialog: document.querySelector("#assign-pin-dialog"),
@@ -460,17 +464,28 @@ function renderAssignmentItems() {
     elements.assignItemList.append(empty);
   }
   const limitCopy = matches.length > visible.length ? ` · showing first ${visible.length}` : "";
-  elements.assignMeta.textContent = `${matches.length} matching of ${state.assignmentItems.length} active items${limitCopy}`;
+  const storedCopy = state.assignmentStoredAt
+    ? ` · stored ${new Date(state.assignmentStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
+    : "";
+  elements.assignMeta.textContent = `${matches.length} matching of ${state.assignmentItems.length} active items${limitCopy}${storedCopy}`;
   updateAssignmentSummary();
 }
 
 async function loadAssignmentItems(refresh = false) {
   state.busy = true;
-  elements.assignMeta.textContent = refresh ? "Refreshing active stock items from MYOB…" : "Loading active stock items from MYOB…";
+  elements.assignLoading.hidden = false;
+  elements.assignLoadingTitle.textContent = refresh
+    ? "Refreshing stock items from MYOB…"
+    : "Loading the stock-item catalogue…";
+  elements.assignWorkspace.setAttribute("aria-busy", "true");
+  elements.refreshAssignItems.disabled = true;
+  elements.refreshAssignItems.textContent = refresh ? "Refreshing…" : "Loading…";
+  elements.assignMeta.textContent = refresh ? "Refreshing active stock items from MYOB…" : "Loading active stock items…";
   elements.reviewAssignments.disabled = true;
   try {
     const response = await api(`/api/barcode-admin/items${refresh ? "?refresh=true" : ""}`, { barcodeAdmin: true });
     state.assignmentItems = response.items;
+    state.assignmentStoredAt = response.stored_at;
     state.assignmentSelected = new Set(
       [...state.assignmentSelected].filter((code) => response.items.some((item) => item.item_code === code && item.assignable))
     );
@@ -480,6 +495,10 @@ async function loadAssignmentItems(refresh = false) {
     showMessage(error.message);
   } finally {
     state.busy = false;
+    elements.assignLoading.hidden = true;
+    elements.assignWorkspace.removeAttribute("aria-busy");
+    elements.refreshAssignItems.disabled = false;
+    elements.refreshAssignItems.textContent = "↻ Refresh from MYOB";
     updateAssignmentSummary();
   }
 }
@@ -530,7 +549,7 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
 
 elements.assignSearch.addEventListener("input", renderAssignmentItems);
 elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
-document.querySelector("#refresh-assign-items").addEventListener("click", () => loadAssignmentItems(true));
+elements.refreshAssignItems.addEventListener("click", () => loadAssignmentItems(true));
 document.querySelector("#clear-assign-selection").addEventListener("click", () => {
   state.assignmentSelected.clear();
   renderAssignmentItems();

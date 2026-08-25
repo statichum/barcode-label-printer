@@ -9,7 +9,7 @@
       name="description"
       content="Look up purchase orders and print product barcode labels."
     />
-    <link rel="stylesheet" href="/static/styles.css?v=12" />
+    <link rel="stylesheet" href="/static/styles.css?v=13" />
   </head>
   <body>
     <header class="topbar">
@@ -105,6 +105,10 @@
             <div class="assign-heading">
               <p id="assign-meta">Loading active stock items…</p>
               <button id="clear-assign-selection" class="text-button" type="button">Clear selection</button>
+            </div>
+            <div id="assign-loading" class="assign-loading" role="status" aria-live="polite" hidden>
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <span><b id="assign-loading-title">Loading stock items from MYOB…</b><small>MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
             </div>
             <div class="assign-table-head" aria-hidden="true"><span>Assign</span><span>Item</span><span>Current barcode</span></div>
             <div id="assign-item-list" class="assign-item-list"></div>
@@ -210,6 +214,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=12" defer></script>
+    <script src="/static/app.js?v=13" defer></script>
   </body>
 </html>

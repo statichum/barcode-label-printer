@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import logging
 import hmac
+import json
+import logging
 import secrets
 import threading
 import time
@@ -51,7 +52,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.2.0",
+    version="1.2.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -61,8 +62,9 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 barcode_admin_sessions: dict[str, float] = {}
 barcode_assignment_previews: dict[str, dict] = {}
-barcode_catalog_cache: dict = {"items": None, "expires_at": 0.0}
+barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0}
 barcode_admin_lock = threading.Lock()
+barcode_catalog_refresh_lock = threading.Lock()
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -82,14 +84,52 @@ def require_barcode_admin(authorization: str | None) -> str:
     return token
 
 
-def load_assignment_catalog(refresh: bool = False) -> list[dict]:
-    now = time.monotonic()
+def _barcode_catalog_path() -> Path:
+    return settings.data_dir / "barcode-stock-items.json"
+
+
+def _read_stored_assignment_catalog() -> tuple[list[dict], float] | None:
+    path = _barcode_catalog_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        items = payload["items"]
+        stored_at = float(payload["stored_at"])
+        if payload.get("version") != 2 or not isinstance(items, list):
+            raise ValueError("unsupported catalogue format")
+        return items, stored_at
+    except FileNotFoundError:
+        return None
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        logger.warning("Ignoring unreadable stored barcode catalogue: %s", exc)
+        return None
+
+
+def _write_stored_assignment_catalog(items: list[dict], stored_at: float) -> None:
+    path = _barcode_catalog_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"version": 2, "stored_at": stored_at, "items": items}),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _set_assignment_catalog(items: list[dict], stored_at: float) -> None:
     with barcode_admin_lock:
-        cached_items = barcode_catalog_cache["items"]
-        if not refresh and cached_items is not None and barcode_catalog_cache["expires_at"] > now:
-            return cached_items
-    items = myob.list_active_stock_items()
-    public_items = [
+        barcode_catalog_cache["items"] = items
+        barcode_catalog_cache["stored_at"] = stored_at
+        barcode_catalog_cache["generation"] += 1
+
+
+def _stored_assignment_item(item: dict) -> dict:
+    stored = dict(item)
+    stored["alternate_ids"] = sorted(item.get("alternate_ids", []))
+    return stored
+
+
+def _public_assignment_catalog(items: list[dict]) -> list[dict]:
+    return [
         {
             "item_code": item["item_code"],
             "description": item["description"],
@@ -102,17 +142,63 @@ def load_assignment_catalog(refresh: bool = False) -> list[dict]:
             ),
         }
         for item in items
+        if item.get("status") == "Active"
     ]
-    with barcode_admin_lock:
-        barcode_catalog_cache["items"] = public_items
-        barcode_catalog_cache["expires_at"] = now + 300
-    return public_items
 
 
-def invalidate_assignment_catalog() -> None:
+def load_assignment_catalog(refresh: bool = False) -> tuple[list[dict], float]:
     with barcode_admin_lock:
-        barcode_catalog_cache["items"] = None
-        barcode_catalog_cache["expires_at"] = 0.0
+        starting_generation = barcode_catalog_cache["generation"]
+
+    # Only one request may walk the large MYOB catalogue at a time. Requests
+    # that arrived while that walk was running reuse its result.
+    with barcode_catalog_refresh_lock:
+        with barcode_admin_lock:
+            cached_items = barcode_catalog_cache["items"]
+            stored_at = barcode_catalog_cache["stored_at"]
+            refreshed_while_waiting = (
+                barcode_catalog_cache["generation"] != starting_generation
+            )
+            if cached_items is not None and (not refresh or refreshed_while_waiting):
+                return cached_items, stored_at
+
+        if not refresh:
+            stored = _read_stored_assignment_catalog()
+            if stored is not None:
+                items, stored_at = stored
+                _set_assignment_catalog(items, stored_at)
+                logger.info("Loaded %s stock items from the stored catalogue", len(items))
+                return items, stored_at
+
+        items = [
+            _stored_assignment_item(item)
+            for item in myob.list_stock_items(active_only=False)
+        ]
+        stored_at = time.time()
+        _write_stored_assignment_catalog(items, stored_at)
+        _set_assignment_catalog(items, stored_at)
+        logger.info("Stored %s refreshed stock items", len(items))
+        return items, stored_at
+
+
+def update_stored_assignment_catalog(verified_items: dict[str, dict]) -> None:
+    with barcode_catalog_refresh_lock:
+        with barcode_admin_lock:
+            items = barcode_catalog_cache["items"]
+            stored_at = barcode_catalog_cache["stored_at"]
+        if items is None:
+            stored = _read_stored_assignment_catalog()
+            if stored is None:
+                return
+            items, stored_at = stored
+        updated_items = []
+        for item in items:
+            verified = verified_items.get(item["item_code"].upper())
+            updated_items.append(
+                _stored_assignment_item(verified) if verified else item
+            )
+        _write_stored_assignment_catalog(updated_items, stored_at)
+        _set_assignment_catalog(updated_items, stored_at)
 
 
 def load_catalog_items(item_codes: list[str]):
@@ -172,11 +258,11 @@ def barcode_admin_items(
 ):
     require_barcode_admin(authorization)
     try:
-        items = load_assignment_catalog(refresh=refresh)
+        items, stored_at = load_assignment_catalog(refresh=refresh)
     except MyobError as exc:
         logger.warning("MYOB barcode catalog lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"items": items, "cached_for_seconds": 300}
+    return {"items": _public_assignment_catalog(items), "stored_at": stored_at}
 
 
 @app.post("/api/barcode-admin/assignments/preview")
@@ -186,12 +272,12 @@ def preview_barcode_assignments(
 ):
     admin_token = require_barcode_admin(authorization)
     try:
-        all_items = myob.list_stock_items(active_only=False)
+        all_items, _ = load_assignment_catalog()
         assignments = plan_barcode_assignments(request.item_codes, all_items)
     except BarcodeAssignmentConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MyobError as exc:
-        logger.warning("MYOB barcode collision check failed: %s", exc)
+        logger.warning("Barcode catalogue lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     preview_token = secrets.token_urlsafe(32)
     with barcode_admin_lock:
@@ -229,12 +315,12 @@ def commit_barcode_assignments(
 
     assignments = preview["assignments"]
     try:
-        all_items = myob.list_stock_items(active_only=False)
+        all_items, _ = load_assignment_catalog()
         validate_barcode_assignments(assignments, all_items)
     except BarcodeAssignmentConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MyobError as exc:
-        logger.warning("MYOB final barcode collision check failed: %s", exc)
+        logger.warning("Final barcode catalogue check failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     assigned = []
@@ -246,12 +332,14 @@ def commit_barcode_assignments(
                 assignment.get("cross_reference_id"),
             )
             assigned.append(assignment)
-        verified = myob.get_stock_items([item["item_code"] for item in assignments])
+        verified = myob.get_assignment_stock_items(
+            [item["item_code"] for item in assignments]
+        )
         failed_verification = [
             item["item_code"]
             for item in assignments
             if verified.get(item["item_code"].upper()) is None
-            or verified[item["item_code"].upper()].barcode != item["barcode"]
+            or verified[item["item_code"].upper()].get("barcode") != item["barcode"]
         ]
         if failed_verification:
             raise MyobError(
@@ -266,7 +354,7 @@ def commit_barcode_assignments(
         )
         raise HTTPException(status_code=502, detail=f"{exc}.{suffix}".strip()) from exc
 
-    invalidate_assignment_catalog()
+    update_stored_assignment_catalog(verified)
     logger.info("Assigned MYOB barcodes to %s item(s)", len(assigned))
     return {"assigned": assigned, "count": len(assigned)}
 

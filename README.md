@@ -11,7 +11,7 @@ The operator can:
 - add item codes and quantities manually; and
 - print the item description, item code, and scannable Code 128 barcode.
 
-The **Assign barcodes** tab is protected by a server-configured PIN. It loads active MYOB stock items for local code/description searching, shows each current Barcode cross-reference, previews generated internal EAN-13 values, rechecks all stock-item cross-references for collisions, and then updates MYOB. An existing Barcode detail row—including an `x` placeholder—is deleted by its MYOB detail `id` and replaced in the same PUT; a new row is appended only when no Barcode row exists.
+The **Assign barcodes** tab is protected by a server-configured PIN. It loads active MYOB stock items for local code/description searching, shows each current Barcode cross-reference, previews generated internal EAN-13 values, rechecks the stored stock-item snapshot for collisions, and then updates MYOB. The complete snapshot—including inactive items for collision protection—is stored in `data/barcode-stock-items.json`, survives container restarts, and changes only after a manual refresh or successful assignment. Concurrent refresh requests share one MYOB catalogue load. Review and confirmation use this local snapshot rather than downloading the catalogue again; only changed items are read back from MYOB after writing. An existing Barcode detail row—including an `x` placeholder—is deleted by its MYOB detail `id` and replaced in the same PUT; a new row is appended only when no Barcode row exists.
 
 The service also exposes a narrow staff-label endpoint for PRV Pick & Pack. It uses the same SATO discovery, retry, spool and 50 × 30 mm Code 128 layout while accepting a staff name and generated `PPU-XXXX-XXXX` badge code.
 

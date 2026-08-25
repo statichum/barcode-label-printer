@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -8,6 +9,9 @@ import httpx
 
 from .config import Settings
 from .database import CatalogItem
+
+
+logger = logging.getLogger("barcode-printer.myob")
 
 
 class MyobError(RuntimeError):
@@ -322,8 +326,19 @@ class MyobClient:
         return payload[0]
 
     def get_stock_items(self, item_codes: list[str]) -> dict[str, CatalogItem]:
+        assignment_items = self.get_assignment_stock_items(item_codes)
+        return {
+            code: CatalogItem(
+                item["item_code"],
+                item["description"],
+                item.get("barcode"),
+            )
+            for code, item in assignment_items.items()
+        }
+
+    def get_assignment_stock_items(self, item_codes: list[str]) -> dict[str, dict]:
         codes = list(dict.fromkeys(code.strip().upper() for code in item_codes if code.strip()))
-        items: dict[str, CatalogItem] = {}
+        items: dict[str, dict] = {}
         for start in range(0, len(codes), 20):
             batch = codes[start : start + 20]
             filters = [
@@ -334,6 +349,7 @@ class MyobClient:
                 f"{self.settings.myob_api_root}/StockItem",
                 params={
                     "$filter": " or ".join(filters),
+                    "$select": "InventoryID,Description,ItemStatus,CrossReferences",
                     "$expand": "CrossReferences",
                 },
             )
@@ -345,9 +361,9 @@ class MyobClient:
             if not isinstance(payload, list):
                 raise MyobError("MYOB did not return valid stock item data")
             for raw_item in payload:
-                item = stock_item_from_myob(raw_item)
+                item = stock_item_assignment_view(raw_item)
                 if item:
-                    items[item.item_code.upper()] = item
+                    items[item["item_code"].upper()] = item
         return items
 
     def list_stock_items(self, active_only: bool = True) -> list[dict]:
@@ -380,6 +396,11 @@ class MyobClient:
                 item = stock_item_assignment_view(raw_item)
                 if item:
                     items[item["item_code"].upper()] = item
+            logger.info(
+                "Loaded %s %s stock items from MYOB",
+                len(items),
+                "active" if active_only else "total",
+            )
             if len(payload) < page_size or len(items) == previous_count:
                 break
             skip += len(payload)
