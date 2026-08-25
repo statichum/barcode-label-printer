@@ -28,6 +28,9 @@ class Settings:
     myob_company: str
     myob_verify_ssl: bool
     myob_timeout_seconds: int
+    barcode_admin_pin: str
+    barcode_admin_session_minutes: int
+    barcode_assignment_enabled: bool
     database_host: str
     database_port: int
     database_name: str
@@ -63,6 +66,9 @@ class Settings:
             myob_company=os.getenv("MYOB_COMPANY", "PRV"),
             myob_verify_ssl=_bool("MYOB_VERIFY_SSL", True),
             myob_timeout_seconds=_int("MYOB_TIMEOUT_SECONDS", 45),
+            barcode_admin_pin=os.getenv("BARCODE_ADMIN_PIN", "").strip(),
+            barcode_admin_session_minutes=_int("BARCODE_ADMIN_SESSION_MINUTES", 30),
+            barcode_assignment_enabled=_bool("BARCODE_ASSIGNMENT_ENABLED", False),
             database_host=os.getenv("DATABASE_HOST", "127.0.0.1"),
             database_port=_int("DATABASE_PORT", 5432),
             database_name=os.getenv("DATABASE_NAME", "prv-syncer"),
@@ -102,6 +108,7 @@ class Settings:
             ("MYOB_PASSWORD", self.myob_password),
             ("DATABASE_PASSWORD", self.database_password),
             ("PRINTER_MAC", self.printer_mac),
+            ("BARCODE_ADMIN_PIN", self.barcode_admin_pin),
         ):
             if not value:
                 missing.append(name)
@@ -109,4 +116,9 @@ class Settings:
             missing.append("PRINTER_PRINT_SPEED (use 2, 3, or 4)")
         if self.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
             missing.append("PRINTER_DARKNESS (use 1A through 5A)")
+        if self.barcode_admin_pin and (
+            not self.barcode_admin_pin.isdigit()
+            or not 4 <= len(self.barcode_admin_pin) <= 12
+        ):
+            missing.append("BARCODE_ADMIN_PIN (use 4 to 12 digits)")
         return missing

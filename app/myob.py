@@ -18,6 +18,10 @@ class PurchaseOrderNotFound(MyobError):
     pass
 
 
+class BarcodeAssignmentConflict(MyobError):
+    pass
+
+
 def _value(obj: dict, key: str, default=None):
     field = obj.get(key, {})
     return field.get("value", default) if isinstance(field, dict) else default
@@ -49,11 +53,11 @@ def stock_item_from_myob(item: dict) -> CatalogItem | None:
             str(_value(reference, "AlternateID", "") or "").strip()
             for reference in (item.get("CrossReferences") or [])
             if _value(reference, "AlternateType") == "Barcode"
+            and str(_value(reference, "AlternateID", "") or "").strip().lower()
+            not in {"", "x"}
         ),
         "",
     )
-    if barcode.lower() == "x":
-        barcode = ""
     return CatalogItem(
         item_code=item_code,
         description=description,
@@ -89,7 +93,7 @@ def merge_catalog_items(
 
 def merge_purchase_order(order: dict, catalog: dict[str, CatalogItem]) -> dict:
     lines = []
-    for detail in order.get("Details", []):
+    for position, detail in enumerate(order.get("Details", [])):
         item_code = str(_value(detail, "InventoryID", "")).strip().upper()
         if not item_code:
             continue
@@ -100,6 +104,7 @@ def merge_purchase_order(order: dict, catalog: dict[str, CatalogItem]) -> dict:
         lines.append(
             {
                 "line_number": _value(detail, "LineNbr"),
+                "po_position": position,
                 "item_code": item_code,
                 "description": item.description if item else fallback_description,
                 "barcode": item.barcode if item else None,
@@ -117,6 +122,157 @@ def merge_purchase_order(order: dict, catalog: dict[str, CatalogItem]) -> dict:
         "date": _value(order, "Date"),
         "lines": lines,
     }
+
+
+def ean13_internal_barcode(sequence: int) -> str:
+    if not 1 <= sequence <= 9_999_999_999:
+        raise ValueError("Internal barcode sequence is out of range")
+    body = f"04{sequence:010d}"
+    weighted_sum = sum(
+        int(digit) * (3 if position % 2 == 0 else 1)
+        for position, digit in enumerate(body, start=1)
+    )
+    check_digit = (10 - (weighted_sum % 10)) % 10
+    return f"{body}{check_digit}"
+
+
+def internal_barcode_sequence(value: str) -> int | None:
+    code = str(value or "").strip()
+    if len(code) != 13 or not code.isdigit() or not code.startswith("04"):
+        return None
+    sequence = int(code[2:12])
+    if sequence < 1:
+        return None
+    return sequence if ean13_internal_barcode(sequence) == code else None
+
+
+def stock_item_assignment_view(item: dict) -> dict | None:
+    catalog_item = stock_item_from_myob(item)
+    if not catalog_item:
+        return None
+    alternate_ids = {
+        str(_value(reference, "AlternateID", "") or "").strip()
+        for reference in (item.get("CrossReferences") or [])
+        if str(_value(reference, "AlternateID", "") or "").strip()
+    }
+    barcode_references = [
+        reference
+        for reference in (item.get("CrossReferences") or [])
+        if _value(reference, "AlternateType") == "Barcode"
+    ]
+    barcode_reference = barcode_references[0] if barcode_references else None
+    return {
+        "item_code": catalog_item.item_code,
+        "description": catalog_item.description,
+        "barcode": catalog_item.barcode,
+        "barcode_reference_id": barcode_reference.get("id") if barcode_reference else None,
+        "barcode_reference_value": (
+            str(_value(barcode_reference, "AlternateID", "") or "").strip()
+            if barcode_reference
+            else None
+        ),
+        "barcode_reference_count": len(barcode_references),
+        "status": str(_value(item, "ItemStatus", "") or "").strip(),
+        "alternate_ids": alternate_ids,
+    }
+
+
+def plan_barcode_assignments(item_codes: list[str], stock_items: list[dict]) -> list[dict]:
+    by_code = {item["item_code"].upper(): item for item in stock_items}
+    used_ids = {
+        alternate_id
+        for item in stock_items
+        for alternate_id in item.get("alternate_ids", set())
+    }
+    missing = [code for code in item_codes if code.upper() not in by_code]
+    if missing:
+        raise BarcodeAssignmentConflict(
+            f"Active stock item not found: {', '.join(missing)}"
+        )
+    inactive = [
+        by_code[code.upper()]["item_code"]
+        for code in item_codes
+        if by_code[code.upper()].get("status") not in {"", "Active"}
+    ]
+    if inactive:
+        raise BarcodeAssignmentConflict(
+            f"Stock item is no longer active: {', '.join(inactive)}"
+        )
+    duplicate_rows = [
+        by_code[code.upper()]["item_code"]
+        for code in item_codes
+        if by_code[code.upper()].get("barcode_reference_count", 0) > 1
+    ]
+    if duplicate_rows:
+        raise BarcodeAssignmentConflict(
+            f"Multiple Barcode rows must be cleaned up in MYOB first: {', '.join(duplicate_rows)}"
+        )
+
+    used_sequences = [
+        sequence
+        for alternate_id in used_ids
+        if (sequence := internal_barcode_sequence(alternate_id)) is not None
+    ]
+    sequence = max(used_sequences, default=0) + 1
+    assignments = []
+    for raw_code in item_codes:
+        item = by_code[raw_code.upper()]
+        barcode = ean13_internal_barcode(sequence)
+        while barcode in used_ids:
+            sequence += 1
+            barcode = ean13_internal_barcode(sequence)
+        assignments.append(
+            {
+                "item_code": item["item_code"],
+                "description": item["description"],
+                "barcode": barcode,
+                "action": "replace" if item.get("barcode_reference_id") else "create",
+                "previous_barcode": item.get("barcode_reference_value"),
+                "cross_reference_id": item.get("barcode_reference_id"),
+            }
+        )
+        used_ids.add(barcode)
+        sequence += 1
+    return assignments
+
+
+def validate_barcode_assignments(assignments: list[dict], stock_items: list[dict]) -> None:
+    by_code = {item["item_code"].upper(): item for item in stock_items}
+    used_ids = {
+        alternate_id
+        for item in stock_items
+        for alternate_id in item.get("alternate_ids", set())
+    }
+    proposed = set()
+    for assignment in assignments:
+        item = by_code.get(assignment["item_code"].upper())
+        if not item:
+            raise BarcodeAssignmentConflict(
+                f"{assignment['item_code']} is no longer an active stock item"
+            )
+        if item.get("barcode_reference_count", 0) > 1:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} now has multiple Barcode rows"
+            )
+        if assignment.get("action") == "replace":
+            if item.get("barcode_reference_id") != assignment.get("cross_reference_id"):
+                raise BarcodeAssignmentConflict(
+                    f"The Barcode row for {item['item_code']} changed after preview"
+                )
+            if item.get("barcode_reference_value") != assignment.get("previous_barcode"):
+                raise BarcodeAssignmentConflict(
+                    f"The barcode for {item['item_code']} changed after preview"
+                )
+        elif item.get("barcode_reference_id"):
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} gained a Barcode row after preview"
+            )
+        barcode = assignment["barcode"]
+        if internal_barcode_sequence(barcode) is None:
+            raise BarcodeAssignmentConflict(f"{barcode} is not a valid internal barcode")
+        if barcode in used_ids or barcode in proposed:
+            raise BarcodeAssignmentConflict(f"Barcode {barcode} is already in use")
+        proposed.add(barcode)
 
 
 @dataclass
@@ -194,13 +350,87 @@ class MyobClient:
                     items[item.item_code.upper()] = item
         return items
 
-    def _authenticated_get(self, path: str, params: dict[str, str]):
+    def list_stock_items(self, active_only: bool = True) -> list[dict]:
+        page_size = 500
+        skip = 0
+        items: dict[str, dict] = {}
+        while True:
+            params = {
+                "$top": str(page_size),
+                "$skip": str(skip),
+                "$select": "InventoryID,Description,ItemStatus,CrossReferences",
+                "$expand": "CrossReferences",
+                "$orderby": "InventoryID",
+            }
+            if active_only:
+                params["$filter"] = "ItemStatus eq 'Active'"
+            response = self._authenticated_get(
+                f"{self.settings.myob_api_root}/StockItem",
+                params=params,
+            )
+            try:
+                response.raise_for_status()
+                payload = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                raise MyobError("MYOB did not return a valid active stock-item list") from exc
+            if not isinstance(payload, list):
+                raise MyobError("MYOB did not return a valid active stock-item list")
+            previous_count = len(items)
+            for raw_item in payload:
+                item = stock_item_assignment_view(raw_item)
+                if item:
+                    items[item["item_code"].upper()] = item
+            if len(payload) < page_size or len(items) == previous_count:
+                break
+            skip += len(payload)
+        return list(items.values())
+
+    def list_active_stock_items(self) -> list[dict]:
+        return self.list_stock_items(active_only=True)
+
+    def assign_barcode(
+        self,
+        item_code: str,
+        barcode: str,
+        cross_reference_id: str | None = None,
+    ) -> None:
+        replacement = {
+            "AlternateID": {"value": barcode},
+            "AlternateType": {"value": "Barcode"},
+            "UOM": {"value": "EACH"},
+        }
+        if cross_reference_id:
+            cross_references = [
+                {"id": cross_reference_id, "delete": True},
+                replacement,
+            ]
+        else:
+            cross_references = [replacement]
+        response = self._authenticated_request(
+            "PUT",
+            f"{self.settings.myob_api_root}/StockItem",
+            json={
+                "InventoryID": {"value": item_code},
+                "CrossReferences": cross_references,
+            },
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise MyobError(
+                f"MYOB rejected barcode {barcode} for {item_code} with HTTP {response.status_code}"
+            ) from exc
+
+    def _authenticated_request(self, method: str, path: str, **kwargs):
         with self._lock:
             if not self._authenticated:
                 self._login()
-            response = self._client.get(path, params=params)
+            response = self._client.request(method, path, **kwargs)
             if response.status_code in {401, 403}:
                 self._authenticated = False
                 self._login()
-                response = self._client.get(path, params=params)
+                response = self._client.request(method, path, **kwargs)
         return response
+
+    def _authenticated_get(self, path: str, params: dict[str, str]):
+        return self._authenticated_request("GET", path, params=params)

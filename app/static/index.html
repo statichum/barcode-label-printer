@@ -9,7 +9,7 @@
       name="description"
       content="Look up purchase orders and print product barcode labels."
     />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=12" />
   </head>
   <body>
     <header class="topbar">
@@ -43,6 +43,9 @@
           </button>
           <button class="mode-tab" role="tab" aria-selected="false" aria-controls="manual-panel" id="manual-tab" data-mode="manual">
             <span class="tab-number">02</span> Manual entry
+          </button>
+          <button class="mode-tab" role="tab" aria-selected="false" aria-controls="assign-panel" id="assign-tab" data-mode="assign">
+            <span class="tab-number">03</span> Assign barcodes
           </button>
         </div>
 
@@ -81,6 +84,36 @@
             <p class="field-help">Add one item at a time; quantities can still be changed below.</p>
           </form>
         </div>
+
+        <div class="panel assign-panel" id="assign-panel" role="tabpanel" aria-labelledby="assign-tab" hidden>
+          <div id="assign-locked" class="assign-locked">
+            <div>
+              <p class="eyebrow">PIN PROTECTED</p>
+              <h2>Assign internal barcodes.</h2>
+              <p>Search active MYOB stock items and assign checked, collision-free PRV barcodes.</p>
+            </div>
+            <button id="unlock-assign" class="primary-button" type="button">Enter PIN</button>
+          </div>
+          <div id="assign-workspace" hidden>
+            <div class="assign-toolbar">
+              <label for="assign-search">Search item code or description
+                <input id="assign-search" type="search" autocomplete="off" placeholder="Start typing to filter…" />
+              </label>
+              <label class="missing-toggle"><input id="assign-missing-only" type="checkbox" checked /> Only items without a barcode</label>
+              <button id="refresh-assign-items" class="secondary-button" type="button">↻ Refresh from MYOB</button>
+            </div>
+            <div class="assign-heading">
+              <p id="assign-meta">Loading active stock items…</p>
+              <button id="clear-assign-selection" class="text-button" type="button">Clear selection</button>
+            </div>
+            <div class="assign-table-head" aria-hidden="true"><span>Assign</span><span>Item</span><span>Current barcode</span></div>
+            <div id="assign-item-list" class="assign-item-list"></div>
+            <div class="assign-bar">
+              <div><b id="assign-count">0 items selected</b><small>Assignments are previewed and collision-checked before MYOB is changed.</small></div>
+              <button id="review-assignments" class="print-button" type="button" disabled>Review assignments</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <div id="message" class="message" role="alert" aria-live="assertive" hidden></div>
@@ -92,10 +125,16 @@
             <h2 id="result-title">Labels</h2>
             <p id="result-meta"></p>
           </div>
-          <div class="selection-tools">
-            <button type="button" class="text-button" id="select-all">Select all</button>
-            <span aria-hidden="true">/</span>
-            <button type="button" class="text-button" id="select-none">Clear</button>
+          <div class="result-tools">
+            <div id="sort-control" class="sort-control" aria-label="Label sort order" hidden>
+              <button type="button" data-sort="po" class="active">PO order</button>
+              <button type="button" data-sort="natural">Natural sort</button>
+            </div>
+            <div class="selection-tools">
+              <button type="button" class="text-button" id="select-all">Select all</button>
+              <span aria-hidden="true">/</span>
+              <button type="button" class="text-button" id="select-none">Clear</button>
+            </div>
           </div>
         </div>
 
@@ -145,7 +184,32 @@
       </article>
     </template>
 
+    <dialog id="assign-pin-dialog" class="dialog">
+      <form id="assign-pin-form" class="dialog-card">
+        <button id="assign-pin-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">BARCODE ADMINISTRATION</p>
+        <h2>Enter the PIN.</h2>
+        <p>This PIN is configured on the server and restricts MYOB barcode changes.</p>
+        <label for="assign-pin">Administration PIN
+          <input id="assign-pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="12" autocomplete="off" required />
+        </label>
+        <button class="primary-button" type="submit">Open barcode assignment</button>
+      </form>
+    </dialog>
+
+    <dialog id="assignment-preview-dialog" class="dialog assignment-preview-dialog">
+      <div class="dialog-card">
+        <button id="assignment-preview-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">FINAL REVIEW</p>
+        <h2>Assign these barcodes?</h2>
+        <p>MYOB is checked again immediately before these changes are written.</p>
+        <div id="assignment-preview-list" class="assignment-preview-list"></div>
+        <p id="assignment-write-warning" class="write-warning" hidden>Writes are disabled on the server until the MYOB PUT test is confirmed.</p>
+        <button id="commit-assignments" class="danger-button" type="button">Assign barcodes in MYOB</button>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=12" defer></script>
   </body>
 </html>

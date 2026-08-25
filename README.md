@@ -6,9 +6,12 @@ The operator can:
 
 - enter a MYOB Advanced purchase-order number;
 - review the order's inventory lines, selected by default;
+- switch purchase-order labels between MYOB line order and natural item-code order;
 - exclude lines or change label quantities;
 - add item codes and quantities manually; and
 - print the item description, item code, and scannable Code 128 barcode.
+
+The **Assign barcodes** tab is protected by a server-configured PIN. It loads active MYOB stock items for local code/description searching, shows each current Barcode cross-reference, previews generated internal EAN-13 values, rechecks all stock-item cross-references for collisions, and then updates MYOB. An existing Barcode detail row—including an `x` placeholder—is deleted by its MYOB detail `id` and replaced in the same PUT; a new row is appended only when no Barcode row exists.
 
 The service also exposes a narrow staff-label endpoint for PRV Pick & Pack. It uses the same SATO discovery, retry, spool and 50 × 30 mm Code 128 layout while accepting a staff name and generated `PPU-XXXX-XXXX` badge code.
 
@@ -17,6 +20,7 @@ MYOB supplies the PO item codes and ordered quantities. Descriptions are read fr
 ## Safety and network behavior
 
 - `PRINT_ENABLED=false` is the default. Jobs are written to `spool/` but not transmitted.
+- `BARCODE_ASSIGNMENT_ENABLED=false` is the default. Barcode previews work, but MYOB writes remain blocked until the setting is explicitly enabled.
 - The SATO is identified by `PRINTER_MAC`, not its DHCP address.
 - The last working address is cached under `data/` and checked before another LAN scan.
 - If sending fails, the cache is invalidated, the printer is rediscovered, and the job is retried once.
@@ -66,6 +70,10 @@ LABEL_WIDTH_MM=50
 LABEL_HEIGHT_MM=30
 PRINTER_DOTS_PER_MM=12
 PRINT_ENABLED=false
+
+BARCODE_ADMIN_PIN=choose-a-4-to-12-digit-pin
+BARCODE_ADMIN_SESSION_MINUTES=30
+BARCODE_ASSIGNMENT_ENABLED=false
 ```
 
 For the CG4, print speed `2`, `3`, and `4` select 50, 75, and 100 mm/s respectively. Darkness accepts `1A` through `5A`. Start at speed `2` and darkness `4A`, then reduce darkness if barcode bars become thick or lose edge definition.
@@ -77,6 +85,20 @@ MYOB_VERIFY_SSL=false
 ```
 
 Re-enable verification when the endpoint presents a certificate trusted by the container.
+
+## Barcode assignment safeguards
+
+The generated value follows PRV's spreadsheet rule: `04`, a zero-padded ten-digit sequence, and the EAN-13 check digit. Before previewing, the app reads every stock item's cross-references—not only active items—finds the highest valid existing PRV sequence, and allocates new values above it. It also treats every alternate ID as occupied, preventing collisions with Barcode, Global, vendor, or customer references.
+
+Immediately before writing, the app repeats the full collision check and confirms that each target Barcode detail row is unchanged since preview. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified.
+
+Enable writes when ready to use the assignment screen:
+
+```dotenv
+BARCODE_ASSIGNMENT_ENABLED=true
+```
+
+Restart the service after changing the setting.
 
 ## First label test
 

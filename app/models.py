@@ -78,3 +78,29 @@ class StaffLabelPrintRequest(BaseModel):
         if not re.fullmatch(r"PPU-[A-Z0-9]{4}-[A-Z0-9]{4}", cleaned):
             raise ValueError("Staff badge code must use the PPU- format")
         return cleaned
+
+
+class BarcodeAdminLoginRequest(BaseModel):
+    pin: str = Field(min_length=4, max_length=12, pattern=r"^[0-9]+$")
+
+
+class BarcodeAssignmentPreviewRequest(BaseModel):
+    item_codes: list[str] = Field(min_length=1, max_length=100)
+
+    @field_validator("item_codes")
+    @classmethod
+    def clean_item_codes(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            code = value.strip().upper()
+            if not code or len(code) > 80 or any(ord(char) < 32 for char in code):
+                raise ValueError("One or more item codes are invalid")
+            if code not in cleaned:
+                cleaned.append(code)
+        if not cleaned:
+            raise ValueError("Select at least one item")
+        return cleaned
+
+
+class BarcodeAssignmentCommitRequest(BaseModel):
+    preview_token: str = Field(min_length=20, max_length=200)

@@ -3,8 +3,13 @@ const state = {
   resultMode: null,
   items: [],
   reference: null,
+  sortMode: "po",
   printEnabled: false,
   busy: false,
+  barcodeAdminToken: "",
+  assignmentItems: [],
+  assignmentSelected: new Set(),
+  assignmentPreview: null,
 };
 
 const elements = {
@@ -31,12 +36,35 @@ const elements = {
   printButtonLabel: document.querySelector("#print-button-label"),
   printerStatus: document.querySelector("#printer-status"),
   toast: document.querySelector("#toast"),
+  sortControl: document.querySelector("#sort-control"),
+  assignLocked: document.querySelector("#assign-locked"),
+  assignWorkspace: document.querySelector("#assign-workspace"),
+  assignSearch: document.querySelector("#assign-search"),
+  assignMissingOnly: document.querySelector("#assign-missing-only"),
+  assignMeta: document.querySelector("#assign-meta"),
+  assignItemList: document.querySelector("#assign-item-list"),
+  assignCount: document.querySelector("#assign-count"),
+  reviewAssignments: document.querySelector("#review-assignments"),
+  assignPinDialog: document.querySelector("#assign-pin-dialog"),
+  assignmentPreviewDialog: document.querySelector("#assignment-preview-dialog"),
+  assignmentPreviewList: document.querySelector("#assignment-preview-list"),
+  assignmentWriteWarning: document.querySelector("#assignment-write-warning"),
+  commitAssignments: document.querySelector("#commit-assignments"),
 };
 
+const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
 async function api(path, options = {}) {
+  const { barcodeAdmin = false, ...requestOptions } = options;
   const response = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...requestOptions,
+    headers: {
+      "Content-Type": "application/json",
+      ...(barcodeAdmin && state.barcodeAdminToken
+        ? { Authorization: `Bearer ${state.barcodeAdminToken}` }
+        : {}),
+      ...(requestOptions.headers || {}),
+    },
   });
   let data;
   try {
@@ -48,7 +76,10 @@ async function api(path, options = {}) {
     const detail = Array.isArray(data.detail)
       ? data.detail.map((item) => item.msg).join("; ")
       : data.detail;
-    throw new Error(detail || "The request could not be completed");
+    const error = new Error(detail || "The request could not be completed");
+    error.status = response.status;
+    if (barcodeAdmin && response.status === 401) state.barcodeAdminToken = "";
+    throw error;
   }
   return data;
 }
@@ -96,7 +127,13 @@ function switchMode(mode) {
     panel.hidden = !active;
   });
   clearMessage();
-  (mode === "po" ? elements.poNumber : elements.itemCode).focus();
+  if (mode === "assign") {
+    elements.results.hidden = true;
+    showAssignmentAccess();
+  } else {
+    if (state.items.length) elements.results.hidden = false;
+    (mode === "po" ? elements.poNumber : elements.itemCode).focus();
+  }
 }
 
 function quantityValue(value) {
@@ -108,6 +145,11 @@ function renderResults({ title, kicker, meta }) {
   elements.resultKicker.textContent = kicker;
   elements.resultMeta.textContent = meta;
   elements.itemList.replaceChildren();
+
+  elements.sortControl.hidden = state.resultMode !== "po";
+  elements.sortControl.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.sort === state.sortMode);
+  });
 
   state.items.forEach((item, index) => {
     const row = elements.template.content.firstElementChild.cloneNode(true);
@@ -157,6 +199,25 @@ function renderResults({ title, kicker, meta }) {
   updateSummary();
 }
 
+function applyResultSort() {
+  state.items.sort((left, right) => {
+    if (state.sortMode === "po") {
+      return Number(left.po_position ?? 0) - Number(right.po_position ?? 0);
+    }
+    return naturalCollator.compare(left.item_code, right.item_code)
+      || Number(left.po_position ?? 0) - Number(right.po_position ?? 0);
+  });
+}
+
+function rerenderCurrentResults() {
+  applyResultSort();
+  renderResults({
+    kicker: elements.resultKicker.textContent,
+    title: elements.resultTitle.textContent,
+    meta: elements.resultMeta.textContent,
+  });
+}
+
 function updateSummary() {
   const selected = state.items.filter((item) => item.selected && item.printable);
   const labels = selected.reduce((total, item) => total + quantityValue(item.quantity), 0);
@@ -204,6 +265,8 @@ elements.poForm.addEventListener("submit", async (event) => {
     });
     state.items = order.lines;
     state.resultMode = "po";
+    state.sortMode = "po";
+    applyResultSort();
     state.reference = order.po_number || poNumber;
     if (!state.items.length) {
       elements.results.hidden = true;
@@ -291,6 +354,13 @@ elements.selectNone.addEventListener("click", () => {
   });
 });
 
+elements.sortControl.querySelectorAll("button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.sortMode = button.dataset.sort;
+    rerenderCurrentResults();
+  });
+});
+
 elements.printButton.addEventListener("click", async () => {
   clearMessage();
   const selected = state.items
@@ -320,6 +390,207 @@ elements.printButton.addEventListener("click", async () => {
   } finally {
     state.busy = false;
     updateSummary();
+  }
+});
+
+function showAssignmentAccess() {
+  const unlocked = Boolean(state.barcodeAdminToken);
+  elements.assignLocked.hidden = unlocked;
+  elements.assignWorkspace.hidden = !unlocked;
+  if (!unlocked) {
+    if (!elements.assignPinDialog.open) elements.assignPinDialog.showModal();
+    return;
+  }
+  if (!state.assignmentItems.length) loadAssignmentItems(false);
+  else renderAssignmentItems();
+}
+
+function assignmentMatches(item, query) {
+  const hasUsableBarcode = Boolean(item.barcode && item.barcode.toLocaleLowerCase() !== "x");
+  if (elements.assignMissingOnly.checked && hasUsableBarcode) return false;
+  if (!query) return true;
+  return item.item_code.toLocaleLowerCase().includes(query)
+    || item.description.toLocaleLowerCase().includes(query)
+    || String(item.barcode || "").includes(query);
+}
+
+function updateAssignmentSummary() {
+  const count = state.assignmentSelected.size;
+  elements.assignCount.textContent = `${count} item${count === 1 ? "" : "s"} selected`;
+  elements.reviewAssignments.disabled = state.busy || count === 0;
+}
+
+function renderAssignmentItems() {
+  const query = elements.assignSearch.value.trim().toLocaleLowerCase();
+  const matches = state.assignmentItems
+    .filter((item) => assignmentMatches(item, query))
+    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
+  const visible = matches.slice(0, 250);
+  elements.assignItemList.replaceChildren();
+
+  for (const item of visible) {
+    const row = document.createElement("article");
+    row.className = `assign-item-row ${item.assignable ? "" : "existing"}`;
+    row.innerHTML = `
+      <div class="assign-check"><label class="check-control"><input type="checkbox" /><span aria-hidden="true">✓</span><span class="sr-only"></span></label></div>
+      <div><b></b><code></code></div>
+      <div class="assign-current-barcode"><code></code></div>`;
+    const checkbox = row.querySelector("input");
+    checkbox.checked = state.assignmentSelected.has(item.item_code);
+    checkbox.disabled = !item.assignable;
+    row.querySelector(".sr-only").textContent = `Assign a barcode to ${item.item_code}`;
+    row.querySelector("b").textContent = item.description;
+    row.querySelectorAll("code")[0].textContent = item.item_code;
+    const barcode = row.querySelector(".assign-current-barcode code");
+    barcode.textContent = item.barcode || "No barcode";
+    barcode.classList.toggle("missing-barcode", !item.barcode || item.barcode.toLocaleLowerCase() === "x");
+    if (item.warning) barcode.title = item.warning;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.assignmentSelected.add(item.item_code);
+      else state.assignmentSelected.delete(item.item_code);
+      updateAssignmentSummary();
+    });
+    elements.assignItemList.append(row);
+  }
+
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "assign-empty";
+    empty.textContent = "No active stock items match this search.";
+    elements.assignItemList.append(empty);
+  }
+  const limitCopy = matches.length > visible.length ? ` · showing first ${visible.length}` : "";
+  elements.assignMeta.textContent = `${matches.length} matching of ${state.assignmentItems.length} active items${limitCopy}`;
+  updateAssignmentSummary();
+}
+
+async function loadAssignmentItems(refresh = false) {
+  state.busy = true;
+  elements.assignMeta.textContent = refresh ? "Refreshing active stock items from MYOB…" : "Loading active stock items from MYOB…";
+  elements.reviewAssignments.disabled = true;
+  try {
+    const response = await api(`/api/barcode-admin/items${refresh ? "?refresh=true" : ""}`, { barcodeAdmin: true });
+    state.assignmentItems = response.items;
+    state.assignmentSelected = new Set(
+      [...state.assignmentSelected].filter((code) => response.items.some((item) => item.item_code === code && item.assignable))
+    );
+    renderAssignmentItems();
+  } catch (error) {
+    if (error.status === 401) showAssignmentAccess();
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    updateAssignmentSummary();
+  }
+}
+
+function renderAssignmentPreview(preview) {
+  elements.assignmentPreviewList.replaceChildren();
+  for (const assignment of preview.assignments) {
+    const row = document.createElement("div");
+    row.className = "assignment-preview-row";
+    row.innerHTML = "<div><b></b><small></small></div><code></code>";
+    row.querySelector("b").textContent = assignment.item_code;
+    const action = assignment.action === "replace"
+      ? `Replace ${assignment.previous_barcode || "existing Barcode row"}`
+      : "Create new Barcode row";
+    row.querySelector("small").textContent = `${assignment.description} · ${action}`;
+    row.querySelector("code").textContent = assignment.barcode;
+    elements.assignmentPreviewList.append(row);
+  }
+  elements.assignmentWriteWarning.hidden = preview.writes_enabled;
+  elements.commitAssignments.disabled = !preview.writes_enabled;
+  elements.commitAssignments.textContent = `Assign ${preview.assignments.length} barcode${preview.assignments.length === 1 ? "" : "s"} in MYOB`;
+  if (!elements.assignmentPreviewDialog.open) elements.assignmentPreviewDialog.showModal();
+}
+
+document.querySelector("#unlock-assign").addEventListener("click", () => {
+  if (!elements.assignPinDialog.open) elements.assignPinDialog.showModal();
+});
+
+document.querySelector("#assign-pin-close").addEventListener("click", () => elements.assignPinDialog.close());
+document.querySelector("#assign-pin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearMessage();
+  const pinInput = document.querySelector("#assign-pin");
+  try {
+    const response = await api("/api/barcode-admin/login", {
+      method: "POST",
+      body: JSON.stringify({ pin: pinInput.value }),
+    });
+    state.barcodeAdminToken = response.token;
+    pinInput.value = "";
+    elements.assignPinDialog.close();
+    showAssignmentAccess();
+  } catch (error) {
+    showMessage(error.message);
+    pinInput.select();
+  }
+});
+
+elements.assignSearch.addEventListener("input", renderAssignmentItems);
+elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
+document.querySelector("#refresh-assign-items").addEventListener("click", () => loadAssignmentItems(true));
+document.querySelector("#clear-assign-selection").addEventListener("click", () => {
+  state.assignmentSelected.clear();
+  renderAssignmentItems();
+});
+
+elements.reviewAssignments.addEventListener("click", async () => {
+  if (!state.assignmentSelected.size || state.busy) return;
+  state.busy = true;
+  updateAssignmentSummary();
+  clearMessage();
+  try {
+    const preview = await api("/api/barcode-admin/assignments/preview", {
+      method: "POST",
+      barcodeAdmin: true,
+      body: JSON.stringify({ item_codes: [...state.assignmentSelected] }),
+    });
+    state.assignmentPreview = preview;
+    renderAssignmentPreview(preview);
+  } catch (error) {
+    if (error.status === 401) showAssignmentAccess();
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    updateAssignmentSummary();
+  }
+});
+
+document.querySelector("#assignment-preview-close").addEventListener("click", () => elements.assignmentPreviewDialog.close());
+elements.commitAssignments.addEventListener("click", async () => {
+  if (!state.assignmentPreview || state.busy) return;
+  state.busy = true;
+  elements.commitAssignments.disabled = true;
+  elements.commitAssignments.textContent = "Writing to MYOB…";
+  try {
+    const result = await api("/api/barcode-admin/assignments/commit", {
+      method: "POST",
+      barcodeAdmin: true,
+      body: JSON.stringify({ preview_token: state.assignmentPreview.preview_token }),
+    });
+    const assignedByCode = new Map(result.assigned.map((item) => [item.item_code, item.barcode]));
+    state.assignmentItems.forEach((item) => {
+      if (!assignedByCode.has(item.item_code)) return;
+      item.barcode = assignedByCode.get(item.item_code);
+      item.assignable = true;
+      state.assignmentSelected.delete(item.item_code);
+    });
+    elements.assignmentPreviewDialog.close();
+    state.assignmentPreview = null;
+    renderAssignmentItems();
+    showToast(`${result.count} barcode${result.count === 1 ? "" : "s"} assigned in MYOB.`);
+  } catch (error) {
+    if (error.status === 401) {
+      elements.assignmentPreviewDialog.close();
+      showAssignmentAccess();
+    }
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    if (state.assignmentPreview) renderAssignmentPreview(state.assignmentPreview);
+    updateAssignmentSummary();
   }
 });
 
