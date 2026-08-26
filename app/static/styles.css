@@ -278,6 +278,16 @@ button { color: inherit; }
 .stock-label-progress[hidden] { display: none; }
 .stock-label-progress b, .stock-label-progress small { display: block; }
 .stock-label-progress small { margin-top: 3px; color: var(--ink-muted); font-size: 10px; }
+.stock-label-reauth { margin: 16px 0; padding: 15px; border: 1px solid #bcd8cf; background: #e9f5f0; }
+.stock-label-reauth[hidden] { display: none; }
+.stock-label-reauth p { margin: 0 0 12px; color: var(--forest); }
+.stock-label-reauth p b, .stock-label-reauth p small { display: block; }
+.stock-label-reauth p small { margin-top: 4px; color: var(--ink-muted); font-size: 10px; }
+.stock-label-reauth label { display: block; margin-bottom: 10px; color: var(--ink-muted); font-size: 10px; font-weight: 800; }
+.stock-label-reauth input { width: 100%; height: 48px; display: block; margin-top: 6px; padding: 0 13px; border: 1px solid #aab9b2; border-radius: 5px; background: white; color: var(--ink); font-size: 18px; outline: 0; }
+.stock-label-reauth input:focus { border-color: var(--forest); box-shadow: 0 0 0 3px rgba(23, 72, 62, .12); }
+.stock-label-reauth .primary-button { width: 100%; }
+.stock-label-reauth .write-warning { margin-bottom: 10px; }
 .dialog-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 20px; }
 .dialog-actions .primary-button { width: auto; }
 

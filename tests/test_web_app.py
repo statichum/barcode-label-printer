@@ -13,6 +13,7 @@ def test_home_page_declares_web_app_icons():
     assert 'rel="manifest" href="/static/manifest.webmanifest"' in response.text
     assert 'rel="apple-touch-icon"' in response.text
     assert 'name="apple-mobile-web-app-capable" content="yes"' in response.text
+    assert 'id="stock-label-reauth"' in response.text
 
 
 def test_web_app_manifest_and_icons_are_served():

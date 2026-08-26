@@ -17,6 +17,8 @@ The **Assign barcodes** tab is protected by a server-configured PIN. It loads ac
 
 After a successful assignment, the operator can prepare labels for those items using current `QtyAvailable` in the `MAIN` warehouse. The availability result is loaded only when requested, filtered to the newly assigned items, and opened in the normal label review list before printing.
 
+Successful assignment commits renew the barcode-administration session, including after a long large-batch write. The assigned item codes are also retained in browser session storage until stock labels are prepared or the operator chooses **Done**. If authentication still expires, the completion dialog accepts the PIN again and automatically resumes the MAIN stock lookup without losing that batch.
+
 The service also exposes a narrow staff-label endpoint for PRV Pick & Pack. It uses the same SATO discovery, retry, spool and 50 × 30 mm Code 128 layout while accepting a staff name and generated `PPU-XXXX-XXXX` badge code.
 
 MYOB supplies the PO item codes and ordered quantities. Descriptions are read from `sf_prodoptions` in the PRV syncer PostgreSQL database, with MYOB's stock-item description as a fallback. Barcodes are always read live from the MYOB `StockItem` `CrossReferences` collection, using the entry whose `AlternateType` is `Barcode`.

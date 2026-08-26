@@ -67,7 +67,8 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     client = TestClient(main.app)
     login = client.post("/api/barcode-admin/login", json={"pin": "2468"})
     assert login.status_code == 200
-    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    admin_token = login.json()["token"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
 
     preview = client.post(
         "/api/barcode-admin/assignments/preview",
@@ -98,6 +99,12 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
             "NEW": updated_item,
         },
     ]
+
+    def expire_admin_session_during_write(*_args):
+        with main.barcode_admin_lock:
+            main.barcode_admin_sessions[admin_token] = time.monotonic() - 1
+
+    myob.assign_barcode.side_effect = expire_admin_session_during_write
     committed = client.post(
         "/api/barcode-admin/assignments/commit",
         headers=headers,
@@ -105,6 +112,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     )
 
     assert committed.status_code == 200
+    assert main.barcode_admin_sessions[admin_token] > time.monotonic()
     myob.assign_barcode.assert_called_once_with(
         "NEW", assignment["barcode"], "fresh-placeholder-xref"
     )

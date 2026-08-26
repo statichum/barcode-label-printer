@@ -16,7 +16,7 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=19" />
+    <link rel="stylesheet" href="/static/styles.css?v=20" />
   </head>
   <body>
     <header class="topbar">
@@ -257,6 +257,14 @@
           <span><b>Checking MAIN available stock…</b><small>MYOB returns the full warehouse dataset, so this can take a minute or two.</small></span>
         </div>
         <p id="stock-label-error" class="write-warning" hidden></p>
+        <form id="stock-label-reauth" class="stock-label-reauth" hidden>
+          <p><b>Re-enter the administration PIN to continue.</b><small id="stock-label-reauth-copy">Your assigned-item list is still safely held on this screen.</small></p>
+          <label for="stock-label-pin">Administration PIN
+            <input id="stock-label-pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="12" autocomplete="off" required />
+          </label>
+          <p id="stock-label-reauth-error" class="write-warning" hidden></p>
+          <button class="primary-button" type="submit">Log in and prepare labels</button>
+        </form>
         <div class="dialog-actions">
           <button id="prepare-stock-labels" class="primary-button" type="button">Prepare MAIN stock labels</button>
           <button id="assignment-complete-done" class="secondary-button" type="button">Done</button>
@@ -275,6 +283,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=19" defer></script>
+    <script src="/static/app.js?v=20" defer></script>
   </body>
 </html>

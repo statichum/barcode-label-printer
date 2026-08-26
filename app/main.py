@@ -53,7 +53,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.6.0",
+    version="1.6.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -86,6 +86,16 @@ def require_barcode_admin(authorization: str | None) -> str:
             barcode_large_batch_sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Barcode administration session expired")
     return token
+
+
+def renew_barcode_admin_session(token: str) -> int:
+    expires_in = max(5, settings.barcode_admin_session_minutes) * 60
+    expires_at = time.monotonic() + expires_in
+    with barcode_admin_lock:
+        barcode_admin_sessions[token] = expires_at
+        if token in barcode_large_batch_sessions:
+            barcode_large_batch_sessions[token] = expires_at
+    return expires_in
 
 
 def large_barcode_batches_unlocked(token: str) -> bool:
@@ -263,9 +273,7 @@ def barcode_admin_login(request: BarcodeAdminLoginRequest):
     if not hmac.compare_digest(request.pin, settings.barcode_admin_pin):
         raise HTTPException(status_code=401, detail="Incorrect barcode administration PIN")
     token = secrets.token_urlsafe(32)
-    expires_in = max(5, settings.barcode_admin_session_minutes) * 60
-    with barcode_admin_lock:
-        barcode_admin_sessions[token] = time.monotonic() + expires_in
+    expires_in = renew_barcode_admin_session(token)
     return {"token": token, "expires_in_seconds": expires_in}
 
 
@@ -414,6 +422,7 @@ def commit_barcode_assignments(
         raise HTTPException(status_code=502, detail=f"{exc}.{suffix}".strip()) from exc
 
     update_stored_assignment_catalog(verified)
+    renew_barcode_admin_session(admin_token)
     logger.info("Assigned MYOB barcodes to %s item(s)", len(assigned))
     return {"assigned": assigned, "count": len(assigned)}
 

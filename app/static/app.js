@@ -67,6 +67,9 @@ const elements = {
   prepareStockLabels: document.querySelector("#prepare-stock-labels"),
   stockLabelProgress: document.querySelector("#stock-label-progress"),
   stockLabelError: document.querySelector("#stock-label-error"),
+  stockLabelReauth: document.querySelector("#stock-label-reauth"),
+  stockLabelReauthCopy: document.querySelector("#stock-label-reauth-copy"),
+  stockLabelReauthError: document.querySelector("#stock-label-reauth-error"),
   printResultDialog: document.querySelector("#print-result-dialog"),
   printResultKicker: document.querySelector("#print-result-kicker"),
   printResultTitle: document.querySelector("#print-result-title"),
@@ -75,6 +78,36 @@ const elements = {
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const defaultMaxAssignmentItems = 350;
+const assignedItemRecoveryKey = "prv-label-station:last-assigned-items";
+
+function rememberAssignedItems(items) {
+  try {
+    sessionStorage.setItem(
+      assignedItemRecoveryKey,
+      JSON.stringify(items.map((item) => ({ item_code: item.item_code })))
+    );
+  } catch {
+    // In-memory recovery still works when browser storage is unavailable.
+  }
+}
+
+function forgetAssignedItems() {
+  try {
+    sessionStorage.removeItem(assignedItemRecoveryKey);
+  } catch {
+    // Nothing else is required when browser storage is unavailable.
+  }
+}
+
+function restoreAssignedItems() {
+  try {
+    const items = JSON.parse(sessionStorage.getItem(assignedItemRecoveryKey) || "[]");
+    if (!Array.isArray(items) || items.length > 20_000) return [];
+    return items.filter((item) => item && typeof item.item_code === "string" && item.item_code);
+  } catch {
+    return [];
+  }
+}
 
 async function api(path, options = {}) {
   const { barcodeAdmin = false, ...requestOptions } = options;
@@ -728,8 +761,10 @@ elements.commitAssignments.addEventListener("click", async () => {
     renderAssignmentItems();
     showToast(`${result.count} barcode${result.count === 1 ? "" : "s"} assigned in MYOB.`);
     state.lastAssignedItems = result.assigned;
+    rememberAssignedItems(result.assigned);
     elements.assignmentCompleteSummary.textContent = `${result.count} barcode${result.count === 1 ? " was" : "s were"} assigned successfully.`;
     elements.stockLabelError.hidden = true;
+    elements.stockLabelReauth.hidden = true;
     if (!elements.assignmentCompleteDialog.open) elements.assignmentCompleteDialog.showModal();
   } catch (error) {
     elements.assignmentPreviewDialog.close();
@@ -750,12 +785,32 @@ function closeAssignmentCompleteDialog() {
 }
 
 document.querySelector("#assignment-complete-close").addEventListener("click", closeAssignmentCompleteDialog);
-document.querySelector("#assignment-complete-done").addEventListener("click", closeAssignmentCompleteDialog);
-elements.prepareStockLabels.addEventListener("click", async () => {
+document.querySelector("#assignment-complete-done").addEventListener("click", () => {
+  forgetAssignedItems();
+  state.lastAssignedItems = [];
+  closeAssignmentCompleteDialog();
+});
+
+function showStockLabelReauthentication(message = "Your barcode administration session has expired.") {
+  elements.stockLabelError.textContent = message;
+  elements.stockLabelError.hidden = false;
+  elements.stockLabelReauthCopy.textContent = `The ${state.lastAssignedItems.length}-item assigned list is still safely held and will be used after login.`;
+  elements.stockLabelReauthError.hidden = true;
+  elements.stockLabelReauth.hidden = false;
+  elements.prepareStockLabels.disabled = true;
+  document.querySelector("#stock-label-pin").focus();
+}
+
+async function prepareAssignedStockLabels() {
   if (!state.lastAssignedItems.length || state.busy) return;
+  if (!state.barcodeAdminToken) {
+    showStockLabelReauthentication("Barcode administration PIN required");
+    return;
+  }
   state.busy = true;
   clearMessage();
   elements.stockLabelError.hidden = true;
+  elements.stockLabelReauth.hidden = true;
   elements.stockLabelProgress.hidden = false;
   elements.prepareStockLabels.disabled = true;
   elements.prepareStockLabels.textContent = "Checking MAIN stock…";
@@ -765,6 +820,7 @@ elements.prepareStockLabels.addEventListener("click", async () => {
       barcodeAdmin: true,
       body: JSON.stringify({ item_codes: state.lastAssignedItems.map((item) => item.item_code) }),
     });
+    forgetAssignedItems();
     closeAssignmentCompleteDialog();
     if (!response.items.length) {
       elements.results.hidden = true;
@@ -786,15 +842,48 @@ elements.prepareStockLabels.addEventListener("click", async () => {
     });
     elements.results.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    elements.stockLabelError.textContent = error.message;
-    elements.stockLabelError.hidden = false;
+    if (error.status === 401) showStockLabelReauthentication(error.message);
+    else {
+      elements.stockLabelError.textContent = error.message;
+      elements.stockLabelError.hidden = false;
+    }
   } finally {
     state.busy = false;
     elements.stockLabelProgress.hidden = true;
-    elements.prepareStockLabels.disabled = false;
+    elements.prepareStockLabels.disabled = !elements.stockLabelReauth.hidden;
     elements.prepareStockLabels.textContent = "Prepare MAIN stock labels";
     updateAssignmentSummary();
     updateSummary();
+  }
+}
+
+elements.prepareStockLabels.addEventListener("click", prepareAssignedStockLabels);
+document.querySelector("#stock-label-reauth").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const pinInput = document.querySelector("#stock-label-pin");
+  const submitButton = event.currentTarget.querySelector("button[type='submit']");
+  elements.stockLabelReauthError.hidden = true;
+  submitButton.disabled = true;
+  submitButton.textContent = "Logging in…";
+  try {
+    const response = await api("/api/barcode-admin/login", {
+      method: "POST",
+      body: JSON.stringify({ pin: pinInput.value }),
+    });
+    state.barcodeAdminToken = response.token;
+    state.assignmentLargeBatchUnlocked = false;
+    pinInput.value = "";
+    elements.stockLabelReauth.hidden = true;
+    elements.stockLabelError.hidden = true;
+    elements.prepareStockLabels.disabled = false;
+    await prepareAssignedStockLabels();
+  } catch (error) {
+    elements.stockLabelReauthError.textContent = error.message;
+    elements.stockLabelReauthError.hidden = false;
+    pinInput.select();
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Log in and prepare labels";
   }
 });
 
@@ -804,5 +893,13 @@ function closePrintResultDialog() {
 
 document.querySelector("#print-result-close").addEventListener("click", closePrintResultDialog);
 document.querySelector("#print-result-done").addEventListener("click", closePrintResultDialog);
+
+const recoveredAssignedItems = restoreAssignedItems();
+if (recoveredAssignedItems.length) {
+  state.lastAssignedItems = recoveredAssignedItems;
+  elements.assignmentCompleteSummary.textContent = `${recoveredAssignedItems.length} assigned barcode${recoveredAssignedItems.length === 1 ? " was" : "s were"} recovered from this browser session.`;
+  elements.stockLabelError.hidden = true;
+  if (!elements.assignmentCompleteDialog.open) elements.assignmentCompleteDialog.showModal();
+}
 
 checkPrinter();
