@@ -622,7 +622,11 @@ elements.reviewAssignments.addEventListener("click", async () => {
   if (!state.assignmentSelected.size || state.busy) return;
   state.busy = true;
   updateAssignmentSummary();
-  clearMessage();
+  elements.reviewAssignments.textContent = "Reserving barcode numbers…";
+  showMessage(
+    "Reserving permanent, unique barcode numbers. The first reservation after this upgrade scans all MYOB items and can take a few minutes.",
+    "info"
+  );
   try {
     const preview = await api("/api/barcode-admin/assignments/preview", {
       method: "POST",
@@ -630,12 +634,14 @@ elements.reviewAssignments.addEventListener("click", async () => {
       body: JSON.stringify({ item_codes: [...state.assignmentSelected] }),
     });
     state.assignmentPreview = preview;
+    clearMessage();
     renderAssignmentPreview(preview);
   } catch (error) {
     if (error.status === 401) showAssignmentAccess();
     showMessage(error.message);
   } finally {
     state.busy = false;
+    elements.reviewAssignments.textContent = "Review assignments";
     updateAssignmentSummary();
   }
 });

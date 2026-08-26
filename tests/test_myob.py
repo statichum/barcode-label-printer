@@ -187,6 +187,24 @@ def test_assignment_plan_starts_after_highest_used_internal_barcode():
     validate_barcode_assignments(assignments, stock_items)
 
 
+def test_assignment_plan_honours_persisted_minimum_sequence():
+    stock_items = [
+        {
+            "item_code": "NEW",
+            "description": "New item",
+            "barcode": None,
+            "status": "Active",
+            "alternate_ids": set(),
+        }
+    ]
+
+    assignments = plan_barcode_assignments(
+        ["NEW"], stock_items, minimum_sequence=351
+    )
+
+    assert assignments[0]["barcode"] == ean13_internal_barcode(351)
+
+
 def test_assignment_plan_replaces_existing_barcode_row():
     stock_items = [
         {

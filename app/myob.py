@@ -196,7 +196,12 @@ def stock_item_assignment_view(item: dict) -> dict | None:
     }
 
 
-def plan_barcode_assignments(item_codes: list[str], stock_items: list[dict]) -> list[dict]:
+def plan_barcode_assignments(
+    item_codes: list[str],
+    stock_items: list[dict],
+    *,
+    minimum_sequence: int | None = None,
+) -> list[dict]:
     by_code = {item["item_code"].upper(): item for item in stock_items}
     used_ids = {
         alternate_id
@@ -232,7 +237,7 @@ def plan_barcode_assignments(item_codes: list[str], stock_items: list[dict]) -> 
         for alternate_id in used_ids
         if (sequence := internal_barcode_sequence(alternate_id)) is not None
     ]
-    sequence = max(used_sequences, default=0) + 1
+    sequence = max(max(used_sequences, default=0) + 1, minimum_sequence or 1)
     assignments = []
     for raw_code in item_codes:
         item = by_code[raw_code.upper()]

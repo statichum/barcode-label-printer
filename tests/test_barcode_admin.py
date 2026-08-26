@@ -56,6 +56,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
         ),
     ]
     myob.list_active_stock_items.return_value = catalog
+    myob.list_stock_items.return_value = catalog
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     main.barcode_admin_sessions.clear()
@@ -77,6 +78,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     assert assignment["action"] == "replace"
     assert assignment["previous_barcode"] == "x"
     assert assignment["cross_reference_id"] == "placeholder-xref"
+    myob.list_stock_items.assert_called_once_with(active_only=False)
 
     current_item = stock_item(
         "NEW",

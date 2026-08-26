@@ -13,6 +13,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .barcode_sequence import BarcodeSequenceError, reserve_barcode_assignments
 from .config import Settings
 from .database import CatalogRepository
 from .labels import PrintService
@@ -32,7 +33,6 @@ from .myob import (
     PurchaseOrderNotFound,
     merge_catalog_items,
     merge_purchase_order,
-    plan_barcode_assignments,
     refresh_barcode_assignment_targets,
     validate_barcode_assignments,
 )
@@ -53,7 +53,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.4.0",
+    version="1.5.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -278,9 +278,17 @@ def preview_barcode_assignments(
     admin_token = require_barcode_admin(authorization)
     try:
         all_items, _ = load_assignment_catalog()
-        assignments = plan_barcode_assignments(request.item_codes, all_items)
+        assignments = reserve_barcode_assignments(
+            data_dir=settings.data_dir,
+            item_codes=request.item_codes,
+            active_items=all_items,
+            load_all_items=lambda: myob.list_stock_items(active_only=False),
+        )
     except BarcodeAssignmentConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BarcodeSequenceError as exc:
+        logger.error("Barcode sequence reservation failed: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except MyobError as exc:
         logger.warning("Barcode catalogue lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
