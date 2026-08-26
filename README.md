@@ -2,6 +2,8 @@
 
 A small internal web service for preparing and printing 50 × 30 mm product labels on the networked SATO CG412DT-LAN.
 
+The site includes Android and iPad home-screen metadata and a green PRV Label Station icon in standard, maskable, and Apple touch sizes.
+
 The operator can:
 
 - enter a MYOB Advanced purchase-order number;

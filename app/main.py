@@ -10,7 +10,7 @@ from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .barcode_sequence import BarcodeSequenceError, reserve_barcode_assignments
@@ -53,7 +53,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.5.0",
+    version="1.5.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -229,7 +229,7 @@ def index():
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
-    return Response(status_code=204)
+    return FileResponse(static_dir / "icon-192.png", media_type="image/png")
 
 
 @app.get("/api/health")
