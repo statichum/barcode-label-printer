@@ -9,7 +9,7 @@
       name="description"
       content="Look up purchase orders and print product barcode labels."
     />
-    <link rel="stylesheet" href="/static/styles.css?v=16" />
+    <link rel="stylesheet" href="/static/styles.css?v=17" />
   </head>
   <body>
     <header class="topbar">
@@ -105,7 +105,7 @@
             <div class="assign-heading">
               <p id="assign-meta">Loading active stock items…</p>
               <div class="assign-selection-actions">
-                <button id="select-visible-assign-items" class="text-button" type="button">Select all visible</button>
+                <button id="select-filtered-assign-items" class="text-button" type="button">Select all filtered</button>
                 <button id="clear-assign-selection" class="text-button" type="button">Clear selection</button>
               </div>
             </div>
@@ -116,7 +116,7 @@
             <div class="assign-table-head" aria-hidden="true"><span>Assign</span><span>Item</span><span>Current barcode</span></div>
             <div id="assign-item-list" class="assign-item-list"></div>
             <div class="assign-bar">
-              <div><b id="assign-count">0 items selected</b><small>Assignments are previewed and collision-checked before MYOB is changed.</small></div>
+              <div><b id="assign-count">0 items selected</b><small>Assignments are previewed and collision-checked before MYOB is changed. Maximum 350 items per batch.</small></div>
               <button id="review-assignments" class="print-button" type="button" disabled>Review assignments</button>
             </div>
           </div>
@@ -235,7 +235,17 @@
       </div>
     </dialog>
 
+    <dialog id="print-result-dialog" class="dialog">
+      <div class="dialog-card">
+        <button id="print-result-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p id="print-result-kicker" class="eyebrow">PRINT COMPLETE</p>
+        <h2 id="print-result-title">Barcodes sent to printer successfully.</h2>
+        <p id="print-result-message"></p>
+        <button id="print-result-done" class="primary-button" type="button">Done</button>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=16" defer></script>
+    <script src="/static/app.js?v=17" defer></script>
   </body>
 </html>

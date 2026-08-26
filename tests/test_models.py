@@ -1,8 +1,12 @@
+import pytest
+from pydantic import ValidationError
+
 from app.models import (
     BarcodeAdminLoginRequest,
     BarcodeAssignmentPreviewRequest,
     ManualItemLookupRequest,
     PrintItemRequest,
+    PrintRequest,
     StaffLabelPrintRequest,
 )
 
@@ -32,6 +36,36 @@ def test_barcode_assignment_codes_are_normalized_and_deduplicated():
     request = BarcodeAssignmentPreviewRequest(item_codes=[" new2 ", "NEW2", "new10"])
 
     assert request.item_codes == ["NEW2", "NEW10"]
+
+
+def test_barcode_assignment_accepts_350_items_and_rejects_351():
+    request = BarcodeAssignmentPreviewRequest(
+        item_codes=[f"ITEM{index}" for index in range(350)]
+    )
+
+    assert len(request.item_codes) == 350
+    with pytest.raises(ValidationError):
+        BarcodeAssignmentPreviewRequest(
+            item_codes=[f"ITEM{index}" for index in range(351)]
+        )
+
+
+def test_print_job_accepts_350_item_rows():
+    request = PrintRequest(
+        items=[
+            PrintItemRequest(item_code=f"ITEM{index}", quantity=1)
+            for index in range(350)
+        ]
+    )
+
+    assert len(request.items) == 350
+    with pytest.raises(ValidationError):
+        PrintRequest(
+            items=[
+                PrintItemRequest(item_code=f"ITEM{index}", quantity=1)
+                for index in range(351)
+            ]
+        )
 
 
 def test_barcode_admin_pin_requires_digits():

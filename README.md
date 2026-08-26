@@ -90,9 +90,9 @@ Re-enable verification when the endpoint presents a certificate trusted by the c
 
 ## Barcode assignment safeguards
 
-The generated value follows PRV's spreadsheet rule: `04`, a zero-padded ten-digit sequence, and the EAN-13 check digit. Before previewing, the app reads every stock item's cross-references—not only active items—finds the highest valid existing PRV sequence, and allocates new values above it. It also treats every alternate ID as occupied, preventing collisions with Barcode, Global, vendor, or customer references.
+The generated value follows PRV's spreadsheet rule: `04`, a zero-padded ten-digit sequence, and the EAN-13 check digit. Before previewing, the app uses the stored active-item catalogue to find the highest valid existing PRV sequence and allocates new values above it. It also treats every alternate ID in that catalogue as occupied, preventing collisions with Barcode, Global, vendor, or customer references.
 
-Immediately before writing, the app repeats the full collision check and confirms that each target Barcode detail row is unchanged since preview. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified.
+Immediately before writing, the app reads the selected items from MYOB, repeats the collision check, and uses the current-session Barcode detail row IDs. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified. **Select all filtered** includes matching items beyond the first 250 displayed rows, with a guarded maximum of 350 assignments per batch.
 
 Enable writes when ready to use the assignment screen:
 

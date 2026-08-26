@@ -48,7 +48,7 @@ const elements = {
   assignLoading: document.querySelector("#assign-loading"),
   assignLoadingTitle: document.querySelector("#assign-loading-title"),
   refreshAssignItems: document.querySelector("#refresh-assign-items"),
-  selectVisibleAssignItems: document.querySelector("#select-visible-assign-items"),
+  selectFilteredAssignItems: document.querySelector("#select-filtered-assign-items"),
   assignCount: document.querySelector("#assign-count"),
   reviewAssignments: document.querySelector("#review-assignments"),
   assignPinDialog: document.querySelector("#assign-pin-dialog"),
@@ -61,9 +61,14 @@ const elements = {
   prepareStockLabels: document.querySelector("#prepare-stock-labels"),
   stockLabelProgress: document.querySelector("#stock-label-progress"),
   stockLabelError: document.querySelector("#stock-label-error"),
+  printResultDialog: document.querySelector("#print-result-dialog"),
+  printResultKicker: document.querySelector("#print-result-kicker"),
+  printResultTitle: document.querySelector("#print-result-title"),
+  printResultMessage: document.querySelector("#print-result-message"),
 };
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+const maxAssignmentItems = 350;
 
 async function api(path, options = {}) {
   const { barcodeAdmin = false, ...requestOptions } = options;
@@ -123,6 +128,13 @@ function showToast(text) {
   toastTimer = setTimeout(() => {
     elements.toast.hidden = true;
   }, 5000);
+}
+
+function showPrintResult({ success, title, message }) {
+  elements.printResultKicker.textContent = success ? "PRINT COMPLETE" : "PRINT ERROR";
+  elements.printResultTitle.textContent = title;
+  elements.printResultMessage.textContent = message;
+  if (!elements.printResultDialog.open) elements.printResultDialog.showModal();
 }
 
 function switchMode(mode) {
@@ -393,13 +405,22 @@ elements.printButton.addEventListener("click", async () => {
         reference: state.reference,
       }),
     });
-    showToast(
-      result.status === "submitted"
-        ? `${result.label_count} labels sent to the printer.`
-        : `${result.label_count} labels saved as test job ${result.job_id}. Nothing was printed.`
-    );
+    const submitted = result.status === "submitted";
+    showPrintResult({
+      success: true,
+      title: submitted
+        ? "Barcodes sent to printer successfully."
+        : "Test print job saved successfully.",
+      message: submitted
+        ? `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} accepted by the printer connection.`
+        : `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} saved as test job ${result.job_id}. Nothing was printed.`,
+    });
   } catch (error) {
-    showMessage(error.message);
+    showPrintResult({
+      success: false,
+      title: "Print error",
+      message: error.message,
+    });
   } finally {
     state.busy = false;
     updateSummary();
@@ -433,12 +454,11 @@ function updateAssignmentSummary() {
   elements.reviewAssignments.disabled = state.busy || count === 0;
 }
 
-function visibleAssignmentItems() {
+function filteredAssignmentItems() {
   const query = elements.assignSearch.value.trim().toLocaleLowerCase();
   return state.assignmentItems
     .filter((item) => assignmentMatches(item, query))
-    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code))
-    .slice(0, 250);
+    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
 }
 
 function renderAssignmentItems() {
@@ -467,8 +487,14 @@ function renderAssignmentItems() {
     barcode.classList.toggle("missing-barcode", !item.barcode || item.barcode.toLocaleLowerCase() === "x");
     if (item.warning) barcode.title = item.warning;
     checkbox.addEventListener("change", () => {
-      if (checkbox.checked) state.assignmentSelected.add(item.item_code);
-      else state.assignmentSelected.delete(item.item_code);
+      if (checkbox.checked) {
+        if (state.assignmentSelected.size >= maxAssignmentItems) {
+          checkbox.checked = false;
+          showMessage(`A barcode assignment batch is limited to ${maxAssignmentItems} items.`, "info");
+          return;
+        }
+        state.assignmentSelected.add(item.item_code);
+      } else state.assignmentSelected.delete(item.item_code);
       updateAssignmentSummary();
     });
     elements.assignItemList.append(row);
@@ -567,9 +593,23 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
 elements.assignSearch.addEventListener("input", renderAssignmentItems);
 elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
 elements.refreshAssignItems.addEventListener("click", () => loadAssignmentItems(true));
-elements.selectVisibleAssignItems.addEventListener("click", () => {
-  for (const item of visibleAssignmentItems()) {
-    if (item.assignable) state.assignmentSelected.add(item.item_code);
+elements.selectFilteredAssignItems.addEventListener("click", () => {
+  clearMessage();
+  const filtered = filteredAssignmentItems().filter((item) => item.assignable);
+  let skipped = 0;
+  for (const item of filtered) {
+    if (state.assignmentSelected.has(item.item_code)) continue;
+    if (state.assignmentSelected.size >= maxAssignmentItems) {
+      skipped += 1;
+      continue;
+    }
+    state.assignmentSelected.add(item.item_code);
+  }
+  if (skipped) {
+    showMessage(
+      `${maxAssignmentItems} items selected—the safe batch limit. Narrow the filter to process the remaining ${skipped}.`,
+      "info"
+    );
   }
   renderAssignmentItems();
 });
@@ -693,5 +733,12 @@ elements.prepareStockLabels.addEventListener("click", async () => {
     updateSummary();
   }
 });
+
+function closePrintResultDialog() {
+  if (elements.printResultDialog.open) elements.printResultDialog.close();
+}
+
+document.querySelector("#print-result-close").addEventListener("click", closePrintResultDialog);
+document.querySelector("#print-result-done").addEventListener("click", closePrintResultDialog);
 
 checkPrinter();

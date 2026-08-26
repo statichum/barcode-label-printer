@@ -46,7 +46,7 @@ class PrintItemRequest(BaseModel):
 
 
 class PrintRequest(BaseModel):
-    items: list[PrintItemRequest] = Field(min_length=1, max_length=100)
+    items: list[PrintItemRequest] = Field(min_length=1, max_length=350)
     source: str = Field(default="manual", max_length=20)
     reference: str | None = Field(default=None, max_length=80)
 
@@ -85,7 +85,7 @@ class BarcodeAdminLoginRequest(BaseModel):
 
 
 class BarcodeAssignmentPreviewRequest(BaseModel):
-    item_codes: list[str] = Field(min_length=1, max_length=100)
+    item_codes: list[str] = Field(min_length=1, max_length=350)
 
     @field_validator("item_codes")
     @classmethod
