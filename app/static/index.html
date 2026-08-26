@@ -16,7 +16,7 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=18" />
+    <link rel="stylesheet" href="/static/styles.css?v=19" />
   </head>
   <body>
     <header class="topbar">
@@ -123,7 +123,15 @@
             <div class="assign-table-head" aria-hidden="true"><span>Assign</span><span>Item</span><span>Current barcode</span></div>
             <div id="assign-item-list" class="assign-item-list"></div>
             <div class="assign-bar">
-              <div><b id="assign-count">0 items selected</b><small>Assignments are previewed and collision-checked before MYOB is changed. Maximum 350 items per batch.</small></div>
+              <div>
+                <b id="assign-count">0 items selected</b>
+                <small>Assignments are previewed and collision-checked before MYOB is changed.</small>
+                <div class="large-batch-control">
+                  <span id="assignment-limit-copy">Maximum 350 items per batch.</span>
+                  <button id="unlock-large-assignments" class="text-button" type="button">Unlock larger batches</button>
+                  <span id="large-assignments-unlocked" hidden>✓ Larger batches unlocked for this session</span>
+                </div>
+              </div>
               <button id="review-assignments" class="print-button" type="button" disabled>Review assignments</button>
             </div>
           </div>
@@ -211,6 +219,20 @@
       </form>
     </dialog>
 
+    <dialog id="large-batch-pin-dialog" class="dialog">
+      <form id="large-batch-pin-form" class="dialog-card">
+        <button id="large-batch-pin-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">LARGE BARCODE BATCH</p>
+        <h2>Re-enter the PIN.</h2>
+        <p>This removes the normal 350-item guardrail for the remainder of this administration session.</p>
+        <label for="large-batch-pin">Administration PIN
+          <input id="large-batch-pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="12" autocomplete="off" required />
+        </label>
+        <p id="large-batch-pin-error" class="write-warning" hidden></p>
+        <button class="danger-button" type="submit">Unlock larger batches</button>
+      </form>
+    </dialog>
+
     <dialog id="assignment-preview-dialog" class="dialog assignment-preview-dialog">
       <div class="dialog-card">
         <button id="assignment-preview-close" class="dialog-close" type="button" aria-label="Close">×</button>
@@ -253,6 +275,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=18" defer></script>
+    <script src="/static/app.js?v=19" defer></script>
   </body>
 </html>

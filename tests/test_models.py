@@ -38,15 +38,15 @@ def test_barcode_assignment_codes_are_normalized_and_deduplicated():
     assert request.item_codes == ["NEW2", "NEW10"]
 
 
-def test_barcode_assignment_accepts_350_items_and_rejects_351():
+def test_barcode_assignment_request_accepts_unlocked_catalogue_size():
     request = BarcodeAssignmentPreviewRequest(
-        item_codes=[f"ITEM{index}" for index in range(350)]
+        item_codes=[f"ITEM{index}" for index in range(351)]
     )
 
-    assert len(request.item_codes) == 350
+    assert len(request.item_codes) == 351
     with pytest.raises(ValidationError):
         BarcodeAssignmentPreviewRequest(
-            item_codes=[f"ITEM{index}" for index in range(351)]
+            item_codes=[f"ITEM{index}" for index in range(20_001)]
         )
 
 

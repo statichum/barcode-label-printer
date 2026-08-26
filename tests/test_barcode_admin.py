@@ -60,6 +60,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     main.barcode_admin_sessions.clear()
+    main.barcode_large_batch_sessions.clear()
     main.barcode_assignment_previews.clear()
     reset_barcode_catalog()
 
@@ -136,6 +137,70 @@ def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):
     response = client.post("/api/barcode-admin/login", json={"pin": "9999"})
 
     assert response.status_code == 401
+
+
+def test_large_assignment_batch_requires_pin_reentry_for_that_session(
+    tmp_path, monkeypatch
+):
+    configured = settings(
+        tmp_path,
+        barcode_admin_pin="2468",
+        barcode_assignment_enabled=True,
+    )
+    myob = MagicMock()
+    catalogue = [stock_item(f"ITEM{index:04d}") for index in range(351)]
+    myob.list_active_stock_items.return_value = catalogue
+    myob.list_stock_items.return_value = catalogue
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    main.barcode_admin_sessions.clear()
+    main.barcode_large_batch_sessions.clear()
+    main.barcode_assignment_previews.clear()
+    reset_barcode_catalog()
+
+    client = TestClient(main.app)
+    login = client.post("/api/barcode-admin/login", json={"pin": "2468"})
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    item_codes = [item["item_code"] for item in catalogue]
+
+    denied = client.post(
+        "/api/barcode-admin/assignments/preview",
+        headers=headers,
+        json={"item_codes": item_codes},
+    )
+    assert denied.status_code == 403
+    assert "require the administration PIN" in denied.json()["detail"]
+
+    wrong_pin = client.post(
+        "/api/barcode-admin/unlock-large-batches",
+        headers=headers,
+        json={"pin": "9999"},
+    )
+    assert wrong_pin.status_code == 403
+
+    unlocked = client.post(
+        "/api/barcode-admin/unlock-large-batches",
+        headers=headers,
+        json={"pin": "2468"},
+    )
+    assert unlocked.status_code == 200
+
+    preview = client.post(
+        "/api/barcode-admin/assignments/preview",
+        headers=headers,
+        json={"item_codes": item_codes},
+    )
+    assert preview.status_code == 200
+    assert len(preview.json()["assignments"]) == 351
+
+    second_login = client.post("/api/barcode-admin/login", json={"pin": "2468"})
+    second_headers = {"Authorization": f"Bearer {second_login.json()['token']}"}
+    second_session_denied = client.post(
+        "/api/barcode-admin/assignments/preview",
+        headers=second_headers,
+        json={"item_codes": item_codes},
+    )
+    assert second_session_denied.status_code == 403
 
 
 def test_assignment_catalog_is_stored_and_reused_after_memory_is_cleared(

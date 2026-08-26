@@ -53,7 +53,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.5.1",
+    version="1.6.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -62,10 +62,12 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 barcode_admin_sessions: dict[str, float] = {}
+barcode_large_batch_sessions: dict[str, float] = {}
 barcode_assignment_previews: dict[str, dict] = {}
 barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0}
 barcode_admin_lock = threading.Lock()
 barcode_catalog_refresh_lock = threading.Lock()
+DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -81,8 +83,19 @@ def require_barcode_admin(authorization: str | None) -> str:
         expires_at = barcode_admin_sessions.get(token, 0)
         if expires_at <= now:
             barcode_admin_sessions.pop(token, None)
+            barcode_large_batch_sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Barcode administration session expired")
     return token
+
+
+def large_barcode_batches_unlocked(token: str) -> bool:
+    now = time.monotonic()
+    with barcode_admin_lock:
+        expires_at = barcode_large_batch_sessions.get(token, 0)
+        if expires_at <= now:
+            barcode_large_batch_sessions.pop(token, None)
+            return False
+    return True
 
 
 def _barcode_catalog_path() -> Path:
@@ -270,12 +283,37 @@ def barcode_admin_items(
     return {"items": _public_assignment_catalog(items), "stored_at": stored_at}
 
 
+@app.post("/api/barcode-admin/unlock-large-batches")
+def unlock_large_barcode_batches(
+    request: BarcodeAdminLoginRequest,
+    authorization: str | None = Header(default=None),
+):
+    admin_token = require_barcode_admin(authorization)
+    if not hmac.compare_digest(request.pin, settings.barcode_admin_pin):
+        raise HTTPException(status_code=403, detail="Incorrect administration PIN")
+    with barcode_admin_lock:
+        expires_at = barcode_admin_sessions[admin_token]
+        barcode_large_batch_sessions[admin_token] = expires_at
+    return {"unlocked": True}
+
+
 @app.post("/api/barcode-admin/assignments/preview")
 def preview_barcode_assignments(
     request: BarcodeAssignmentPreviewRequest,
     authorization: str | None = Header(default=None),
 ):
     admin_token = require_barcode_admin(authorization)
+    if (
+        len(request.item_codes) > DEFAULT_BARCODE_ASSIGNMENT_LIMIT
+        and not large_barcode_batches_unlocked(admin_token)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Batches over {DEFAULT_BARCODE_ASSIGNMENT_LIMIT} items require "
+                "the administration PIN to be re-entered"
+            ),
+        )
     try:
         all_items, _ = load_assignment_catalog()
         assignments = reserve_barcode_assignments(

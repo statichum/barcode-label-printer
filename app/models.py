@@ -85,7 +85,9 @@ class BarcodeAdminLoginRequest(BaseModel):
 
 
 class BarcodeAssignmentPreviewRequest(BaseModel):
-    item_codes: list[str] = Field(min_length=1, max_length=350)
+    # The normal 350-item limit is enforced against the authenticated admin
+    # session. This upper bound is only a defensive request-size ceiling.
+    item_codes: list[str] = Field(min_length=1, max_length=20_000)
 
     @field_validator("item_codes")
     @classmethod

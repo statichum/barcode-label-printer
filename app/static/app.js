@@ -11,6 +11,7 @@ const state = {
   assignmentSelected: new Set(),
   assignmentPreview: null,
   assignmentStoredAt: null,
+  assignmentLargeBatchUnlocked: false,
   lastAssignedItems: [],
 };
 
@@ -51,6 +52,11 @@ const elements = {
   selectFilteredAssignItems: document.querySelector("#select-filtered-assign-items"),
   assignCount: document.querySelector("#assign-count"),
   reviewAssignments: document.querySelector("#review-assignments"),
+  assignmentLimitCopy: document.querySelector("#assignment-limit-copy"),
+  unlockLargeAssignments: document.querySelector("#unlock-large-assignments"),
+  largeAssignmentsUnlocked: document.querySelector("#large-assignments-unlocked"),
+  largeBatchPinDialog: document.querySelector("#large-batch-pin-dialog"),
+  largeBatchPinError: document.querySelector("#large-batch-pin-error"),
   assignPinDialog: document.querySelector("#assign-pin-dialog"),
   assignmentPreviewDialog: document.querySelector("#assignment-preview-dialog"),
   assignmentPreviewList: document.querySelector("#assignment-preview-list"),
@@ -68,7 +74,7 @@ const elements = {
 };
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
-const maxAssignmentItems = 350;
+const defaultMaxAssignmentItems = 350;
 
 async function api(path, options = {}) {
   const { barcodeAdmin = false, ...requestOptions } = options;
@@ -94,7 +100,10 @@ async function api(path, options = {}) {
       : data.detail;
     const error = new Error(detail || "The request could not be completed");
     error.status = response.status;
-    if (barcodeAdmin && response.status === 401) state.barcodeAdminToken = "";
+    if (barcodeAdmin && response.status === 401) {
+      state.barcodeAdminToken = "";
+      state.assignmentLargeBatchUnlocked = false;
+    }
     throw error;
   }
   return data;
@@ -452,6 +461,9 @@ function updateAssignmentSummary() {
   const count = state.assignmentSelected.size;
   elements.assignCount.textContent = `${count} item${count === 1 ? "" : "s"} selected`;
   elements.reviewAssignments.disabled = state.busy || count === 0;
+  elements.assignmentLimitCopy.hidden = state.assignmentLargeBatchUnlocked;
+  elements.unlockLargeAssignments.hidden = state.assignmentLargeBatchUnlocked;
+  elements.largeAssignmentsUnlocked.hidden = !state.assignmentLargeBatchUnlocked;
 }
 
 function filteredAssignmentItems() {
@@ -488,9 +500,15 @@ function renderAssignmentItems() {
     if (item.warning) barcode.title = item.warning;
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) {
-        if (state.assignmentSelected.size >= maxAssignmentItems) {
+        if (
+          !state.assignmentLargeBatchUnlocked
+          && state.assignmentSelected.size >= defaultMaxAssignmentItems
+        ) {
           checkbox.checked = false;
-          showMessage(`A barcode assignment batch is limited to ${maxAssignmentItems} items.`, "info");
+          showMessage(
+            `A barcode assignment batch is limited to ${defaultMaxAssignmentItems} items unless a larger batch is unlocked.`,
+            "info"
+          );
           return;
         }
         state.assignmentSelected.add(item.item_code);
@@ -548,7 +566,8 @@ async function loadAssignmentItems(refresh = false) {
 
 function renderAssignmentPreview(preview) {
   elements.assignmentPreviewList.replaceChildren();
-  for (const assignment of preview.assignments) {
+  const visibleAssignments = preview.assignments.slice(0, 500);
+  for (const assignment of visibleAssignments) {
     const row = document.createElement("div");
     row.className = "assignment-preview-row";
     row.innerHTML = "<div><b></b><small></small></div><code></code>";
@@ -559,6 +578,12 @@ function renderAssignmentPreview(preview) {
     row.querySelector("small").textContent = `${assignment.description} · ${action}`;
     row.querySelector("code").textContent = assignment.barcode;
     elements.assignmentPreviewList.append(row);
+  }
+  if (preview.assignments.length > visibleAssignments.length) {
+    const remainder = document.createElement("p");
+    remainder.className = "assignment-preview-remainder";
+    remainder.textContent = `${preview.assignments.length - visibleAssignments.length} additional assignments are selected and will also be written.`;
+    elements.assignmentPreviewList.append(remainder);
   }
   elements.assignmentWriteWarning.hidden = preview.writes_enabled;
   elements.commitAssignments.disabled = !preview.writes_enabled;
@@ -581,6 +606,7 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
       body: JSON.stringify({ pin: pinInput.value }),
     });
     state.barcodeAdminToken = response.token;
+    state.assignmentLargeBatchUnlocked = false;
     pinInput.value = "";
     elements.assignPinDialog.close();
     showAssignmentAccess();
@@ -593,13 +619,45 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
 elements.assignSearch.addEventListener("input", renderAssignmentItems);
 elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
 elements.refreshAssignItems.addEventListener("click", () => loadAssignmentItems(true));
+elements.unlockLargeAssignments.addEventListener("click", () => {
+  elements.largeBatchPinError.hidden = true;
+  if (!elements.largeBatchPinDialog.open) elements.largeBatchPinDialog.showModal();
+  document.querySelector("#large-batch-pin").focus();
+});
+document.querySelector("#large-batch-pin-close").addEventListener("click", () => {
+  elements.largeBatchPinDialog.close();
+});
+document.querySelector("#large-batch-pin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const pinInput = document.querySelector("#large-batch-pin");
+  elements.largeBatchPinError.hidden = true;
+  try {
+    await api("/api/barcode-admin/unlock-large-batches", {
+      method: "POST",
+      barcodeAdmin: true,
+      body: JSON.stringify({ pin: pinInput.value }),
+    });
+    state.assignmentLargeBatchUnlocked = true;
+    pinInput.value = "";
+    elements.largeBatchPinDialog.close();
+    updateAssignmentSummary();
+    showMessage("Larger barcode batches are unlocked for this administration session.", "info");
+  } catch (error) {
+    elements.largeBatchPinError.textContent = error.message;
+    elements.largeBatchPinError.hidden = false;
+    pinInput.select();
+  }
+});
 elements.selectFilteredAssignItems.addEventListener("click", () => {
   clearMessage();
   const filtered = filteredAssignmentItems().filter((item) => item.assignable);
   let skipped = 0;
   for (const item of filtered) {
     if (state.assignmentSelected.has(item.item_code)) continue;
-    if (state.assignmentSelected.size >= maxAssignmentItems) {
+    if (
+      !state.assignmentLargeBatchUnlocked
+      && state.assignmentSelected.size >= defaultMaxAssignmentItems
+    ) {
       skipped += 1;
       continue;
     }
@@ -607,7 +665,7 @@ elements.selectFilteredAssignItems.addEventListener("click", () => {
   }
   if (skipped) {
     showMessage(
-      `${maxAssignmentItems} items selected—the safe batch limit. Narrow the filter to process the remaining ${skipped}.`,
+      `${defaultMaxAssignmentItems} items selected—the normal safe batch limit. Re-enter the PIN to unlock the remaining ${skipped}.`,
       "info"
     );
   }

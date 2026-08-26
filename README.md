@@ -98,7 +98,7 @@ Before each preview is shown, the app takes a filesystem lock, permanently reser
 
 The stored active-item catalogue is still checked for alternate-ID collisions, covering Barcode, Global, vendor, and customer references already present in that snapshot. Normal catalogue refreshes remain active-only.
 
-Immediately before writing, the app reads the selected items from MYOB, repeats the collision check, and uses the current-session Barcode detail row IDs. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified. **Select all filtered** includes matching items beyond the first 250 displayed rows, with a guarded maximum of 350 assignments per batch.
+Immediately before writing, the app reads the selected items from MYOB, repeats the collision check, and uses the current-session Barcode detail row IDs. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified. **Select all filtered** includes matching items beyond the first 250 displayed rows. The normal limit is 350 assignments; an administrator can re-enter the PIN to unlock the full filtered catalogue for only that administration session. The server enforces the unlock, and it expires with the session.
 
 Enable writes when ready to use the assignment screen:
 
