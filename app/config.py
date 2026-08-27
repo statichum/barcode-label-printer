@@ -45,6 +45,8 @@ class Settings:
     arp_interface: str
     printer_connect_timeout_seconds: int
     printer_reopen_delay_ms: int
+    printer_send_attempts: int
+    printer_retry_delay_ms: int
     printer_print_speed: int
     printer_darkness: str
     print_enabled: bool
@@ -83,6 +85,8 @@ class Settings:
             arp_interface=os.getenv("ARP_INTERFACE", "enp5s0"),
             printer_connect_timeout_seconds=_int("PRINTER_CONNECT_TIMEOUT_SECONDS", 3),
             printer_reopen_delay_ms=_int("PRINTER_REOPEN_DELAY_MS", 250),
+            printer_send_attempts=_int("PRINTER_SEND_ATTEMPTS", 3),
+            printer_retry_delay_ms=_int("PRINTER_RETRY_DELAY_MS", 1000),
             printer_print_speed=_int("PRINTER_PRINT_SPEED", 2),
             printer_darkness=os.getenv("PRINTER_DARKNESS", "4A").strip().upper(),
             print_enabled=_bool("PRINT_ENABLED", False),
@@ -116,6 +120,10 @@ class Settings:
             missing.append("PRINTER_PRINT_SPEED (use 2, 3, or 4)")
         if self.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
             missing.append("PRINTER_DARKNESS (use 1A through 5A)")
+        if not 1 <= self.printer_send_attempts <= 10:
+            missing.append("PRINTER_SEND_ATTEMPTS (use 1 through 10)")
+        if self.printer_retry_delay_ms < 0:
+            missing.append("PRINTER_RETRY_DELAY_MS (use zero or greater)")
         if self.barcode_admin_pin and (
             not self.barcode_admin_pin.isdigit()
             or not 4 <= len(self.barcode_admin_pin) <= 12

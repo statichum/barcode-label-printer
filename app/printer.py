@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import socket
 import subprocess
@@ -9,6 +10,9 @@ import time
 from dataclasses import dataclass
 
 from .config import Settings
+
+
+logger = logging.getLogger("barcode-printer")
 
 
 class PrinterUnavailable(RuntimeError):
@@ -144,28 +148,37 @@ class PrinterDiscovery:
             }
 
     def send(self, payload: bytes) -> str:
-        ip = self.resolve()
-        self._wait_for_port_reopen()
-        try:
-            with socket.create_connection(
-                (ip, self.settings.printer_port),
-                timeout=self.settings.printer_connect_timeout_seconds,
-            ) as connection:
-                connection.sendall(payload)
-        except OSError:
-            ip = self.resolve(force_scan=True)
-            self._wait_for_port_reopen()
+        attempts = max(1, self.settings.printer_send_attempts)
+        last_error: OSError | PrinterUnavailable | None = None
+        for attempt in range(attempts):
             try:
+                ip = self.resolve(force_scan=attempt > 0)
+                self._wait_for_port_reopen()
                 with socket.create_connection(
                     (ip, self.settings.printer_port),
                     timeout=self.settings.printer_connect_timeout_seconds,
                 ) as connection:
                     connection.sendall(payload)
-            except OSError as exc:
-                raise PrinterUnavailable(
-                    f"The print data could not be sent ({type(exc).__name__}: {exc})"
-                ) from exc
-        return ip
+                return ip
+            except (OSError, PrinterUnavailable) as exc:
+                last_error = exc
+                logger.warning(
+                    "Printer send attempt %s of %s failed: %s",
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
+                if attempt + 1 < attempts:
+                    self._wait_before_retry()
+
+        assert last_error is not None
+        raise PrinterUnavailable(
+            f"The print data could not be sent after {attempts} attempts "
+            f"({type(last_error).__name__}: {last_error})"
+        ) from last_error
+
+    def _wait_before_retry(self) -> None:
+        time.sleep(max(0, self.settings.printer_retry_delay_ms) / 1000)
 
     def _wait_for_port_reopen(self) -> None:
         time.sleep(max(0, self.settings.printer_reopen_delay_ms) / 1000)

@@ -3,7 +3,7 @@ const state = {
   resultMode: null,
   items: [],
   reference: null,
-  sortMode: "po",
+  sortMode: "natural",
   printEnabled: false,
   busy: false,
   barcodeAdminToken: "",
@@ -332,7 +332,7 @@ elements.poForm.addEventListener("submit", async (event) => {
     });
     state.items = order.lines;
     state.resultMode = "po";
-    state.sortMode = "po";
+    state.sortMode = "natural";
     applyResultSort();
     state.reference = order.po_number || poNumber;
     if (!state.items.length) {
@@ -373,6 +373,7 @@ elements.manualForm.addEventListener("submit", async (event) => {
     if (state.resultMode !== "manual") {
       state.items = [];
       state.resultMode = "manual";
+      state.sortMode = "natural";
     }
     const existingIndex = state.items.length
       ? state.items.findIndex((entry) => entry.item_code === item.item_code)
@@ -386,6 +387,7 @@ elements.manualForm.addEventListener("submit", async (event) => {
       item.quantity = requestedQuantity;
       state.items.push(item);
     }
+    applyResultSort();
     state.reference = null;
     renderResults({
       kicker: "MANUAL LABELS",
@@ -457,6 +459,8 @@ elements.printButton.addEventListener("click", async () => {
         ? `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} accepted by the printer connection.`
         : `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} saved as test job ${result.job_id}. Nothing was printed.`,
     });
+    state.items.forEach((item) => { item.selected = false; });
+    rerenderCurrentResults();
   } catch (error) {
     showPrintResult({
       success: false,

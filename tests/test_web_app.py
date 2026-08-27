@@ -32,3 +32,13 @@ def test_web_app_manifest_and_icons_are_served():
     favicon = client.get("/favicon.ico")
     assert favicon.status_code == 200
     assert favicon.headers["content-type"] == "image/png"
+
+
+def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
+    page = client.get("/").text
+    script = client.get("/static/app.js").text
+
+    assert 'data-sort="natural" class="active"' in page
+    assert 'sortMode: "natural"' in script
+    assert 'state.sortMode = "natural";' in script
+    assert "state.items.forEach((item) => { item.selected = false; });\n    rerenderCurrentResults();" in script

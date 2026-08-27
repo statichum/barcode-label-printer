@@ -1,7 +1,13 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-from app.printer import PrinterDiscovery, normalize_mac, parse_arp_scan
+import pytest
+
+from app.printer import (
+    PrinterDiscovery,
+    PrinterUnavailable,
+    normalize_mac,
+    parse_arp_scan,
+)
 from tests.helpers import settings
 
 
@@ -40,3 +46,47 @@ def test_send_waits_before_reopening_cg4_port(tmp_path):
 
     sleep.assert_called_once_with(0.25)
     connection.sendall.assert_called_once_with(b"label")
+
+
+def test_send_rediscovers_and_retries_when_printer_port_is_temporarily_closed(tmp_path):
+    discovery = PrinterDiscovery(settings(tmp_path))
+    connection = MagicMock()
+    context = MagicMock()
+    context.__enter__.return_value = connection
+
+    with (
+        patch.object(
+            discovery,
+            "resolve",
+            side_effect=[
+                PrinterUnavailable("printer was found, but port 9100 is closed"),
+                "10.10.1.16",
+            ],
+        ) as resolve,
+        patch("app.printer.time.sleep") as sleep,
+        patch("app.printer.socket.create_connection", return_value=context),
+    ):
+        assert discovery.send(b"label") == "10.10.1.16"
+
+    assert resolve.call_args_list == [call(force_scan=False), call(force_scan=True)]
+    assert sleep.call_args_list == [call(1.0), call(0.25)]
+    connection.sendall.assert_called_once_with(b"label")
+
+
+def test_send_reports_failure_only_after_all_discovery_attempts(tmp_path):
+    discovery = PrinterDiscovery(settings(tmp_path))
+    unavailable = PrinterUnavailable("port 9100 is closed")
+
+    with (
+        patch.object(discovery, "resolve", side_effect=unavailable) as resolve,
+        patch("app.printer.time.sleep") as sleep,
+    ):
+        with pytest.raises(PrinterUnavailable, match="after 3 attempts"):
+            discovery.send(b"label")
+
+    assert resolve.call_args_list == [
+        call(force_scan=False),
+        call(force_scan=True),
+        call(force_scan=True),
+    ]
+    assert sleep.call_args_list == [call(1.0), call(1.0)]

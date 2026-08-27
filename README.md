@@ -8,7 +8,7 @@ The operator can:
 
 - enter a MYOB Advanced purchase-order number;
 - review the order's inventory lines, selected by default;
-- switch purchase-order labels between MYOB line order and natural item-code order;
+- review purchase-order labels in natural item-code order by default, with MYOB line order still available;
 - exclude lines or change label quantities;
 - add item codes and quantities manually; and
 - print the item description, item code, and scannable Code 128 barcode.
@@ -29,7 +29,8 @@ MYOB supplies the PO item codes and ordered quantities. Descriptions are read fr
 - `BARCODE_ASSIGNMENT_ENABLED=false` is the default. Barcode previews work, but MYOB writes remain blocked until the setting is explicitly enabled.
 - The SATO is identified by `PRINTER_MAC`, not its DHCP address.
 - The last working address is cached under `data/` and checked before another LAN scan.
-- If sending fails, the cache is invalidated, the printer is rediscovered, and the job is retried once.
+- A print uses three complete discovery/connect/send attempts by default. Failed attempts force fresh MAC discovery so a sleeping printer or temporarily closed port can recover.
+- Successful jobs clear the printed selection in the browser to protect against accidental duplicate batches; failed jobs keep it selected for retry.
 - Connections pause for `PRINTER_REOPEN_DELAY_MS` before reopening port 9100, as required by the CG4 LAN interface.
 - Printing uses raw SBPL over TCP port 9100. CUPS is not required.
 - Raw port 9100 confirms that bytes were submitted, but does not provide a durable printer job ID.
@@ -69,6 +70,8 @@ PRINTER_LANGUAGE=SBPL
 PRINTER_MAC=00:19:98:84:26:F9
 PRINTER_PORT=9100
 ARP_INTERFACE=enp5s0
+PRINTER_SEND_ATTEMPTS=3
+PRINTER_RETRY_DELAY_MS=1000
 PRINTER_PRINT_SPEED=2
 PRINTER_DARKNESS=4A
 

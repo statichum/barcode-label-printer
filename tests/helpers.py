@@ -31,6 +31,8 @@ def settings(tmp_path: Path, **overrides) -> Settings:
         "arp_interface": "enp5s0",
         "printer_connect_timeout_seconds": 1,
         "printer_reopen_delay_ms": 250,
+        "printer_send_attempts": 3,
+        "printer_retry_delay_ms": 1000,
         "printer_print_speed": 2,
         "printer_darkness": "4A",
         "print_enabled": False,

@@ -16,7 +16,7 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20" />
+    <link rel="stylesheet" href="/static/styles.css?v=21" />
   </head>
   <body>
     <header class="topbar">
@@ -149,8 +149,8 @@
           </div>
           <div class="result-tools">
             <div id="sort-control" class="sort-control" aria-label="Label sort order" hidden>
-              <button type="button" data-sort="po" class="active">PO order</button>
-              <button type="button" data-sort="natural">Natural sort</button>
+              <button type="button" data-sort="po">PO order</button>
+              <button type="button" data-sort="natural" class="active">Natural sort</button>
             </div>
             <div class="selection-tools">
               <button type="button" class="text-button" id="select-all">Select all</button>
@@ -283,6 +283,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20" defer></script>
+    <script src="/static/app.js?v=21" defer></script>
   </body>
 </html>
