@@ -58,7 +58,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.10.0",
+    version="1.11.0",
     docs_url="/api/docs",
     redoc_url=None,
 )

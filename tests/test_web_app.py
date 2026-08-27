@@ -81,6 +81,9 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert "Print from PO" in page
     assert "Manual Print" in page
     assert 'id="refresh-barcode-entry-stock"' in page
+    assert 'id="barcode-entry-in-stock-only"' in page
+    assert "In-stock items only" in page
+    assert 'id="barcode-entry-send-dialog"' in page
     assert 'id="refresh-and-prepare-stock-labels"' in page
     assert "On hand" in page
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
@@ -92,3 +95,8 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert "const catalogueRenderBatchSize = 250;" in script
     assert 'button.textContent = `Load ${nextCount.toLocaleString("en-NZ")} more`;' in script
     assert script.count('addEventListener("scroll"') >= 2
+    assert "Number(item.stock_on_hand) <= 0" in script
+    assert 'elements.barcodeEntrySendDialog.showModal()' in script
+    assert 'elements.barcodeEntrySendDialog.addEventListener("cancel"' in script
+    assert 'window.addEventListener("beforeunload"' in script
+    assert "if (state.barcodeEntrySending) return;" in script

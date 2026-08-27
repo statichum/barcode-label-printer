@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=28" />
+    <link rel="stylesheet" href="/static/styles.css?v=29" />
   </head>
   <body>
     <header class="topbar">
@@ -112,11 +112,12 @@
         </div>
 
         <div class="panel assign-panel" id="entry-panel" role="tabpanel" aria-labelledby="entry-tab" hidden>
-          <div class="assign-toolbar">
+          <div class="assign-toolbar entry-toolbar">
             <label for="barcode-entry-search">Search item code or description
               <input id="barcode-entry-search" type="search" autocomplete="off" placeholder="Start typing to filter…" />
             </label>
             <label class="missing-toggle"><input id="barcode-entry-missing-only" type="checkbox" checked /> Only items without a barcode</label>
+            <label id="barcode-entry-in-stock-label" class="missing-toggle unavailable" title="Refresh stock on hand to use this filter"><input id="barcode-entry-in-stock-only" type="checkbox" disabled /> In-stock items only</label>
             <button id="refresh-barcode-entry-items" class="secondary-button" type="button">↻ Refresh from MYOB</button>
           </div>
           <div class="assign-heading">
@@ -318,6 +319,16 @@
       </form>
     </dialog>
 
+    <dialog id="barcode-entry-send-dialog" class="dialog barcode-entry-send-dialog">
+      <div class="dialog-card" role="status" aria-live="assertive" aria-atomic="true">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p class="eyebrow">UPDATING MYOB</p>
+        <h2>Sending barcodes…</h2>
+        <p id="barcode-entry-send-message">MYOB is updating and verifying the selected products.</p>
+        <small>Keep this page open. Other barcode functions are paused until this finishes.</small>
+      </div>
+    </dialog>
+
     <dialog id="large-batch-pin-dialog" class="dialog">
       <form id="large-batch-pin-form" class="dialog-card">
         <button id="large-batch-pin-close" class="dialog-close" type="button" aria-label="Close">×</button>
@@ -383,6 +394,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=28" defer></script>
+    <script src="/static/app.js?v=29" defer></script>
   </body>
 </html>

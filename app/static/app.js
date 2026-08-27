@@ -55,6 +55,8 @@ const elements = {
   sortControl: document.querySelector("#sort-control"),
   barcodeEntrySearch: document.querySelector("#barcode-entry-search"),
   barcodeEntryMissingOnly: document.querySelector("#barcode-entry-missing-only"),
+  barcodeEntryInStockOnly: document.querySelector("#barcode-entry-in-stock-only"),
+  barcodeEntryInStockLabel: document.querySelector("#barcode-entry-in-stock-label"),
   barcodeEntryMeta: document.querySelector("#barcode-entry-meta"),
   barcodeEntryItemList: document.querySelector("#barcode-entry-item-list"),
   barcodeEntryLoading: document.querySelector("#barcode-entry-loading"),
@@ -71,6 +73,8 @@ const elements = {
   barcodeEntryDescription: document.querySelector("#barcode-entry-description"),
   barcodeEntryValue: document.querySelector("#barcode-entry-value"),
   barcodeEntryError: document.querySelector("#barcode-entry-error"),
+  barcodeEntrySendDialog: document.querySelector("#barcode-entry-send-dialog"),
+  barcodeEntrySendMessage: document.querySelector("#barcode-entry-send-message"),
   assignLocked: document.querySelector("#assign-locked"),
   assignWorkspace: document.querySelector("#assign-workspace"),
   assignSearch: document.querySelector("#assign-search"),
@@ -265,6 +269,7 @@ function showPrintResult({ success, title, message }) {
 }
 
 function switchMode(mode) {
+  if (state.barcodeEntrySending) return;
   state.mode = mode;
   elements.tabs.forEach((tab) => {
     const active = tab.dataset.mode === mode;
@@ -648,6 +653,7 @@ function hasUsableBarcode(item) {
 
 function barcodeEntryMatches(item, query) {
   if (elements.barcodeEntryMissingOnly.checked && hasUsableBarcode(item)) return false;
+  if (elements.barcodeEntryInStockOnly.checked && Number(item.stock_on_hand) <= 0) return false;
   return matchesSearchTerms(item, query);
 }
 
@@ -659,6 +665,7 @@ function filteredBarcodeEntryItems() {
 }
 
 function updateBarcodeEntrySummary() {
+  syncBarcodeEntryStockFilter();
   const count = state.barcodeEntryPending.size;
   elements.barcodeEntryCount.textContent = `${count} barcode${count === 1 ? "" : "s"} ready`;
   elements.sendEnteredBarcodes.disabled = state.busy || count === 0;
@@ -714,6 +721,16 @@ function barcodeEntryStockCacheIsFresh() {
   );
 }
 
+function syncBarcodeEntryStockFilter() {
+  const available = barcodeEntryStockCacheIsFresh();
+  if (!available) elements.barcodeEntryInStockOnly.checked = false;
+  elements.barcodeEntryInStockOnly.disabled = state.busy || !available;
+  elements.barcodeEntryInStockLabel.classList.toggle("unavailable", !available);
+  elements.barcodeEntryInStockLabel.title = available
+    ? "Show only items with MAIN stock on hand above zero"
+    : "Refresh stock on hand to use this filter";
+}
+
 function appendLoadMoreControl(container, total, visibleCount, loadMore) {
   const remaining = total - visibleCount;
   if (remaining <= 0) return;
@@ -741,6 +758,7 @@ function loadMoreBarcodeEntryItems() {
 }
 
 function renderBarcodeEntryItems() {
+  syncBarcodeEntryStockFilter();
   const matches = filteredBarcodeEntryItems();
   const visible = matches.slice(0, state.barcodeEntryVisibleLimit);
   const stockCacheFresh = barcodeEntryStockCacheIsFresh();
@@ -902,6 +920,11 @@ elements.barcodeEntryMissingOnly.addEventListener("change", () => {
   elements.barcodeEntryItemList.scrollTop = 0;
   renderBarcodeEntryItems();
 });
+elements.barcodeEntryInStockOnly.addEventListener("change", () => {
+  state.barcodeEntryVisibleLimit = catalogueRenderBatchSize;
+  elements.barcodeEntryItemList.scrollTop = 0;
+  renderBarcodeEntryItems();
+});
 elements.barcodeEntryItemList.addEventListener("scroll", () => {
   const list = elements.barcodeEntryItemList;
   if (list.scrollTop + list.clientHeight >= list.scrollHeight - 140) {
@@ -946,11 +969,28 @@ elements.barcodeEntryForm.addEventListener("submit", (event) => {
   state.barcodeEntrySelected = null;
   renderBarcodeEntryItems();
 });
+
+function openBarcodeEntrySendDialog(count) {
+  elements.barcodeEntrySendMessage.textContent = `MYOB is updating and verifying ${count} product barcode${count === 1 ? "" : "s"}.`;
+  if (!elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.showModal();
+}
+
+elements.barcodeEntrySendDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!state.barcodeEntrySending) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 elements.sendEnteredBarcodes.addEventListener("click", async () => {
   if (!state.barcodeEntryPending.size || state.busy) return;
+  const sendingCount = state.barcodeEntryPending.size;
   clearMessage();
   state.busy = true;
   state.barcodeEntrySending = true;
+  openBarcodeEntrySendDialog(sendingCount);
   updateBarcodeEntrySummary();
   try {
     const result = await api("/api/barcode-entry/commit", {
@@ -979,6 +1019,7 @@ elements.sendEnteredBarcodes.addEventListener("click", async () => {
   } finally {
     state.busy = false;
     state.barcodeEntrySending = false;
+    if (elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.close();
     renderBarcodeEntryItems();
   }
 });
