@@ -16,7 +16,7 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=24" />
+    <link rel="stylesheet" href="/static/styles.css?v=25" />
   </head>
   <body>
     <header class="topbar">
@@ -295,10 +295,10 @@
         <p class="eyebrow">BARCODES ASSIGNED</p>
         <h2>Prepare stock labels?</h2>
         <p id="assignment-complete-summary"></p>
-        <p>Use the current <b>QtyAvailable</b> in the <b>MAIN</b> warehouse. Quantities will open in the normal label list for review before printing.</p>
+        <p>Use the stored <b>QtyOnHand</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 12 hours and can be refreshed on demand.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
-          <span><b>Checking MAIN available stock…</b><small>MYOB returns the full warehouse dataset, so this can take a minute or two.</small></span>
+          <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small></span>
         </div>
         <p id="stock-label-error" class="write-warning" hidden></p>
         <form id="stock-label-reauth" class="stock-label-reauth" hidden>
@@ -309,8 +309,9 @@
           <p id="stock-label-reauth-error" class="write-warning" hidden></p>
           <button class="primary-button" type="submit">Log in and prepare labels</button>
         </form>
-        <div class="dialog-actions">
-          <button id="prepare-stock-labels" class="primary-button" type="button">Prepare MAIN stock labels</button>
+        <div class="dialog-actions stock-label-actions">
+          <button id="prepare-stock-labels" class="primary-button" type="button">Use stored stock</button>
+          <button id="refresh-and-prepare-stock-labels" class="secondary-button" type="button">Refresh stock first</button>
           <button id="assignment-complete-done" class="secondary-button" type="button">Done</button>
         </div>
       </div>
@@ -327,6 +328,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=24" defer></script>
+    <script src="/static/app.js?v=25" defer></script>
   </body>
 </html>

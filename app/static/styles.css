@@ -307,6 +307,7 @@ button { color: inherit; }
 .stock-label-reauth .primary-button { width: 100%; }
 .stock-label-reauth .write-warning { margin-bottom: 10px; }
 .dialog-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 20px; }
+.stock-label-actions { grid-template-columns: minmax(150px, 1fr) auto auto; }
 .dialog-actions .primary-button { width: auto; }
 
 @media (max-width: 780px) {

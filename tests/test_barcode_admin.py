@@ -14,6 +14,7 @@ def reset_barcode_catalog():
         main.barcode_catalog_cache.update(
             {"items": None, "stored_at": None, "generation": 0}
         )
+    main.barcode_stock_cache.update({"quantities": None, "stored_at": None})
 
 
 def stock_item(
@@ -118,7 +119,10 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     )
     myob.list_active_stock_items.assert_called_once_with()
 
-    myob.get_main_qty_available.return_value = {"NEW": 7}
+    stock_stored_at = time.time()
+    main.barcode_stock_cache.update(
+        {"quantities": {"NEW": 7}, "stored_at": stock_stored_at}
+    )
     stock_labels = client.post(
         "/api/barcode-admin/stock-labels",
         headers=headers,
@@ -131,11 +135,62 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
         "description": "Description for NEW",
         "barcode": assignment["barcode"],
         "quantity": 7,
-        "qty_available": 7,
+        "qty_on_hand": 7,
         "selected": True,
         "printable": True,
         "warning": None,
     }
+    assert stock_labels.json()["stock_stored_at"] == stock_stored_at
+    myob.get_main_qty_on_hand.assert_not_called()
+
+
+def test_stock_labels_require_a_fresh_cache_and_refresh_only_on_request(
+    tmp_path, monkeypatch
+):
+    configured = settings(tmp_path)
+    item = stock_item(
+        "NEW",
+        barcode="012345678905",
+        barcode_reference_id="xref",
+        barcode_reference_value="012345678905",
+    )
+    myob = MagicMock()
+    myob.get_main_qty_on_hand.return_value = {"NEW": 5}
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    monkeypatch.setattr(
+        main, "load_assignment_catalog", lambda refresh=False: ([item], 1.0)
+    )
+    token = "stock-cache-test-token"
+    main.barcode_admin_sessions[token] = time.monotonic() + 60
+    headers = {"Authorization": f"Bearer {token}"}
+    main.barcode_stock_cache.update(
+        {
+            "quantities": {"NEW": 9},
+            "stored_at": time.time() - main.BARCODE_STOCK_CACHE_SECONDS - 1,
+        }
+    )
+    client = TestClient(main.app)
+
+    expired = client.post(
+        "/api/barcode-admin/stock-labels",
+        headers=headers,
+        json={"item_codes": ["NEW"]},
+    )
+
+    assert expired.status_code == 409
+    assert "cache expired" in expired.json()["detail"]
+    myob.get_main_qty_on_hand.assert_not_called()
+
+    refreshed = client.post(
+        "/api/barcode-admin/stock-labels?refresh_stock=true",
+        headers=headers,
+        json={"item_codes": ["NEW"]},
+    )
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()["items"][0]["qty_on_hand"] == 5
+    myob.get_main_qty_on_hand.assert_called_once_with(["NEW"])
 
 
 def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):

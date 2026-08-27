@@ -55,7 +55,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.8.0",
+    version="1.8.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -73,6 +73,7 @@ barcode_catalog_refresh_lock = threading.Lock()
 barcode_stock_refresh_lock = threading.Lock()
 barcode_entry_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
+BARCODE_STOCK_CACHE_SECONDS = 12 * 60 * 60
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -252,22 +253,27 @@ def _write_stored_barcode_stock(
 
 def load_barcode_stock_on_hand(
     refresh: bool = False,
-) -> tuple[dict[str, int], float | None]:
+) -> tuple[dict[str, int], float | None, bool]:
     with barcode_stock_refresh_lock:
         quantities = barcode_stock_cache["quantities"]
         stored_at = barcode_stock_cache["stored_at"]
         if not refresh and quantities is not None:
-            return quantities, stored_at
+            fresh = bool(
+                stored_at
+                and time.time() - stored_at < BARCODE_STOCK_CACHE_SECONDS
+            )
+            return (quantities if fresh else {}), stored_at, fresh
 
         if not refresh:
             stored = _read_stored_barcode_stock()
             if stored is None:
-                return {}, None
+                return {}, None, False
             quantities, stored_at = stored
             barcode_stock_cache.update(
                 {"quantities": quantities, "stored_at": stored_at}
             )
-            return quantities, stored_at
+            fresh = time.time() - stored_at < BARCODE_STOCK_CACHE_SECONDS
+            return (quantities if fresh else {}), stored_at, fresh
 
         items, _ = load_assignment_catalog()
         quantities = myob.get_main_qty_on_hand(
@@ -279,7 +285,7 @@ def load_barcode_stock_on_hand(
             {"quantities": quantities, "stored_at": stored_at}
         )
         logger.info("Stored MAIN stock on hand for %s items", len(quantities))
-        return quantities, stored_at
+        return quantities, stored_at, True
 
 
 def load_assignment_catalog(refresh: bool = False) -> tuple[list[dict], float]:
@@ -407,7 +413,9 @@ def barcode_admin_items(
 def barcode_entry_items(refresh: bool = False):
     try:
         items, stored_at = load_assignment_catalog(refresh=refresh)
-        quantities, stock_stored_at = load_barcode_stock_on_hand()
+        quantities, stock_stored_at, stock_cache_fresh = (
+            load_barcode_stock_on_hand()
+        )
     except MyobError as exc:
         logger.warning("MYOB barcode entry catalogue lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -415,17 +423,28 @@ def barcode_entry_items(refresh: bool = False):
         "items": _public_barcode_entry_catalog(items, quantities),
         "stored_at": stored_at,
         "stock_stored_at": stock_stored_at,
+        "stock_cache_fresh": stock_cache_fresh,
+        "stock_expires_at": (
+            stock_stored_at + BARCODE_STOCK_CACHE_SECONDS
+            if stock_stored_at
+            else None
+        ),
     }
 
 
 @app.post("/api/barcode-entry/stock-on-hand/refresh")
 def refresh_barcode_entry_stock_on_hand():
     try:
-        quantities, stored_at = load_barcode_stock_on_hand(refresh=True)
+        quantities, stored_at, _ = load_barcode_stock_on_hand(refresh=True)
     except MyobError as exc:
         logger.warning("MYOB barcode stock-on-hand refresh failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"quantities": quantities, "stored_at": stored_at}
+    return {
+        "quantities": quantities,
+        "stored_at": stored_at,
+        "stock_cache_fresh": True,
+        "expires_at": stored_at + BARCODE_STOCK_CACHE_SECONDS,
+    }
 
 
 @app.post("/api/barcode-entry/commit")
@@ -647,16 +666,28 @@ def commit_barcode_assignments(
 @app.post("/api/barcode-admin/stock-labels")
 def barcode_assignment_stock_labels(
     request: BarcodeAssignmentPreviewRequest,
+    refresh_stock: bool = False,
     authorization: str | None = Header(default=None),
 ):
     require_barcode_admin(authorization)
     catalogue, _ = load_assignment_catalog()
     by_code = {item["item_code"].upper(): item for item in catalogue}
     try:
-        quantities = myob.get_main_qty_available(request.item_codes)
+        quantities, stock_stored_at, stock_cache_fresh = (
+            load_barcode_stock_on_hand(refresh=refresh_stock)
+        )
     except MyobError as exc:
-        logger.warning("MYOB MAIN stock availability lookup failed: %s", exc)
+        logger.warning("MYOB MAIN stock-on-hand refresh failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if not stock_cache_fresh:
+        status = "expired" if stock_stored_at else "has not been refreshed"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The MAIN stock-on-hand cache {status}. Refresh stock before "
+                "preparing labels."
+            ),
+        )
 
     items = []
     zero_stock = []
@@ -665,12 +696,12 @@ def barcode_assignment_stock_labels(
         item = by_code.get(code.upper())
         if not item:
             continue
-        available = max(0, quantities.get(code.upper(), 0))
-        if available <= 0:
+        on_hand = max(0, quantities.get(code.upper(), 0))
+        if on_hand <= 0:
             zero_stock.append(item["item_code"])
             continue
-        quantity = min(available, 999)
-        if available > 999:
+        quantity = min(on_hand, 999)
+        if on_hand > 999:
             limited.append(item["item_code"])
         items.append(
             {
@@ -678,12 +709,12 @@ def barcode_assignment_stock_labels(
                 "description": item["description"],
                 "barcode": item.get("barcode"),
                 "quantity": quantity,
-                "qty_available": available,
+                "qty_on_hand": on_hand,
                 "selected": bool(item.get("barcode")),
                 "printable": bool(item.get("barcode")),
                 "warning": (
-                    f"MAIN QtyAvailable is {available}; label quantity is limited to 999"
-                    if available > 999
+                    f"MAIN QtyOnHand is {on_hand}; label quantity is limited to 999"
+                    if on_hand > 999
                     else None
                 ),
             }
@@ -693,6 +724,8 @@ def barcode_assignment_stock_labels(
         "items": items,
         "zero_stock": zero_stock,
         "limited": limited,
+        "stock_stored_at": stock_stored_at,
+        "stock_expires_at": stock_stored_at + BARCODE_STOCK_CACHE_SECONDS,
     }
 
 

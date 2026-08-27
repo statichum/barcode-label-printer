@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -223,4 +224,17 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
 
     assert stored.json()["items"][0]["stock_on_hand"] == 7
     assert stored.json()["stock_stored_at"] == refreshed.json()["stored_at"]
+    assert stored.json()["stock_cache_fresh"] is True
+    myob.get_main_qty_on_hand.assert_not_called()
+
+    main.barcode_stock_cache.update(
+        {
+            "quantities": {"ITEM1": 7},
+            "stored_at": time.time() - main.BARCODE_STOCK_CACHE_SECONDS - 1,
+        }
+    )
+    expired = client.get("/api/barcode-entry/items")
+
+    assert expired.json()["items"][0]["stock_on_hand"] is None
+    assert expired.json()["stock_cache_fresh"] is False
     myob.get_main_qty_on_hand.assert_not_called()

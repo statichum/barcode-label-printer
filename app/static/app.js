@@ -16,9 +16,11 @@ const state = {
   barcodeEntryItems: [],
   barcodeEntryStoredAt: null,
   barcodeEntryStockStoredAt: null,
+  barcodeEntryStockFresh: false,
   barcodeEntrySelected: null,
   barcodeEntryPending: new Map(),
   barcodeEntrySending: false,
+  stockLabelRefreshRequested: false,
 };
 
 const elements = {
@@ -89,7 +91,10 @@ const elements = {
   assignmentCompleteDialog: document.querySelector("#assignment-complete-dialog"),
   assignmentCompleteSummary: document.querySelector("#assignment-complete-summary"),
   prepareStockLabels: document.querySelector("#prepare-stock-labels"),
+  refreshAndPrepareStockLabels: document.querySelector("#refresh-and-prepare-stock-labels"),
   stockLabelProgress: document.querySelector("#stock-label-progress"),
+  stockLabelProgressTitle: document.querySelector("#stock-label-progress-title"),
+  stockLabelProgressDetail: document.querySelector("#stock-label-progress-detail"),
   stockLabelError: document.querySelector("#stock-label-error"),
   stockLabelReauth: document.querySelector("#stock-label-reauth"),
   stockLabelReauthCopy: document.querySelector("#stock-label-reauth-copy"),
@@ -102,6 +107,7 @@ const elements = {
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const defaultMaxAssignmentItems = 350;
+const stockCacheSeconds = 12 * 60 * 60;
 const assignedItemRecoveryKey = "prv-label-station:last-assigned-items";
 
 function rememberAssignedItems(items) {
@@ -574,9 +580,18 @@ function selectBarcodeEntryItem(item) {
   }, 0);
 }
 
+function barcodeEntryStockCacheIsFresh() {
+  return Boolean(
+    state.barcodeEntryStockFresh
+    && state.barcodeEntryStockStoredAt
+    && Date.now() / 1000 - state.barcodeEntryStockStoredAt < stockCacheSeconds
+  );
+}
+
 function renderBarcodeEntryItems() {
   const matches = filteredBarcodeEntryItems();
   const visible = matches.slice(0, 250);
+  const stockCacheFresh = barcodeEntryStockCacheIsFresh();
   elements.barcodeEntryItemList.replaceChildren();
 
   for (const item of visible) {
@@ -606,11 +621,13 @@ function renderBarcodeEntryItems() {
     warning.textContent = pending ? "Ready to send" : item.warning || "";
     warning.hidden = !warning.textContent;
     const stock = row.querySelector(".entry-stock b");
-    stock.textContent = Number.isInteger(item.stock_on_hand)
+    stock.textContent = stockCacheFresh && Number.isInteger(item.stock_on_hand)
       ? item.stock_on_hand.toLocaleString("en-NZ")
       : "—";
-    stock.title = Number.isInteger(item.stock_on_hand)
+    stock.title = stockCacheFresh && Number.isInteger(item.stock_on_hand)
       ? "MAIN warehouse stock on hand"
+      : state.barcodeEntryStockStoredAt
+      ? "The stock-on-hand cache has expired; refresh it to view stock"
       : "Stock on hand has not been refreshed for this item";
     if (selectable) {
       row.classList.add("selectable");
@@ -639,8 +656,10 @@ function renderBarcodeEntryItems() {
   const storedCopy = state.barcodeEntryStoredAt
     ? ` · refreshed ${new Date(state.barcodeEntryStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
     : "";
-  const stockCopy = state.barcodeEntryStockStoredAt
+  const stockCopy = stockCacheFresh && state.barcodeEntryStockStoredAt
     ? ` · stock ${new Date(state.barcodeEntryStockStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
+    : state.barcodeEntryStockStoredAt
+    ? " · stock cache expired — refresh required"
     : " · stock not refreshed";
   elements.barcodeEntryMeta.textContent = `${matches.length} matching of ${state.barcodeEntryItems.length} active items${limitCopy}${storedCopy}${stockCopy}`;
   renderBarcodeEntryQueue();
@@ -661,6 +680,7 @@ async function loadBarcodeEntryItems(refresh = false) {
     state.barcodeEntryItems = response.items;
     state.barcodeEntryStoredAt = response.stored_at;
     state.barcodeEntryStockStoredAt = response.stock_stored_at;
+    state.barcodeEntryStockFresh = response.stock_cache_fresh;
     renderBarcodeEntryItems();
   } catch (error) {
     showMessage(error.message);
@@ -693,6 +713,7 @@ async function refreshBarcodeEntryStock() {
         : null;
     });
     state.barcodeEntryStockStoredAt = response.stored_at;
+    state.barcodeEntryStockFresh = true;
     renderBarcodeEntryItems();
     showToast("MAIN stock on hand refreshed from MYOB.");
   } catch (error) {
@@ -708,11 +729,7 @@ async function refreshBarcodeEntryStock() {
 }
 
 function showBarcodeEntry() {
-  if (!state.barcodeEntryItems.length) loadBarcodeEntryItems(false);
-  else {
-    renderBarcodeEntryItems();
-    elements.barcodeEntrySearch.focus();
-  }
+  loadBarcodeEntryItems(false);
 }
 
 elements.barcodeEntrySearch.addEventListener("input", renderBarcodeEntryItems);
@@ -1080,6 +1097,7 @@ elements.commitAssignments.addEventListener("click", async () => {
     renderAssignmentItems();
     showToast(`${result.count} barcode${result.count === 1 ? "" : "s"} assigned in MYOB.`);
     state.lastAssignedItems = result.assigned;
+    state.stockLabelRefreshRequested = false;
     rememberAssignedItems(result.assigned);
     elements.assignmentCompleteSummary.textContent = `${result.count} barcode${result.count === 1 ? " was" : "s were"} assigned successfully.`;
     elements.stockLabelError.hidden = true;
@@ -1117,11 +1135,13 @@ function showStockLabelReauthentication(message = "Your barcode administration s
   elements.stockLabelReauthError.hidden = true;
   elements.stockLabelReauth.hidden = false;
   elements.prepareStockLabels.disabled = true;
+  elements.refreshAndPrepareStockLabels.disabled = true;
   document.querySelector("#stock-label-pin").focus();
 }
 
-async function prepareAssignedStockLabels() {
+async function prepareAssignedStockLabels(refreshStock = false) {
   if (!state.lastAssignedItems.length || state.busy) return;
+  state.stockLabelRefreshRequested = refreshStock;
   if (!state.barcodeAdminToken) {
     showStockLabelReauthentication("Barcode administration PIN required");
     return;
@@ -1132,9 +1152,16 @@ async function prepareAssignedStockLabels() {
   elements.stockLabelReauth.hidden = true;
   elements.stockLabelProgress.hidden = false;
   elements.prepareStockLabels.disabled = true;
-  elements.prepareStockLabels.textContent = "Checking MAIN stock…";
+  elements.refreshAndPrepareStockLabels.disabled = true;
+  elements.prepareStockLabels.textContent = refreshStock ? "Waiting for refresh…" : "Checking cache…";
+  elements.stockLabelProgressTitle.textContent = refreshStock
+    ? "Refreshing MAIN stock on hand from MYOB…"
+    : "Checking stored MAIN stock…";
+  elements.stockLabelProgressDetail.textContent = refreshStock
+    ? "MYOB returns the full warehouse dataset, so this can take a minute or two."
+    : "A valid stored snapshot is used immediately.";
   try {
-    const response = await api("/api/barcode-admin/stock-labels", {
+    const response = await api(`/api/barcode-admin/stock-labels${refreshStock ? "?refresh_stock=true" : ""}`, {
       method: "POST",
       barcodeAdmin: true,
       body: JSON.stringify({ item_codes: state.lastAssignedItems.map((item) => item.item_code) }),
@@ -1143,7 +1170,7 @@ async function prepareAssignedStockLabels() {
     closeAssignmentCompleteDialog();
     if (!response.items.length) {
       elements.results.hidden = true;
-      showMessage("None of the newly assigned items currently has QtyAvailable in MAIN.", "info");
+      showMessage("None of the newly assigned items has stored QtyOnHand in MAIN.", "info");
       return;
     }
     state.items = response.items;
@@ -1152,10 +1179,10 @@ async function prepareAssignedStockLabels() {
     state.reference = "MAIN stock after barcode assignment";
     applyResultSort();
     const zeroCopy = response.zero_stock.length
-      ? ` · ${response.zero_stock.length} with no available stock`
+      ? ` · ${response.zero_stock.length} with no stock on hand`
       : "";
     renderResults({
-      kicker: "MAIN AVAILABLE STOCK",
+      kicker: "MAIN STOCK ON HAND",
       title: "New barcode labels",
       meta: `${response.items.length} item${response.items.length === 1 ? "" : "s"} ready${zeroCopy}`,
     });
@@ -1170,13 +1197,16 @@ async function prepareAssignedStockLabels() {
     state.busy = false;
     elements.stockLabelProgress.hidden = true;
     elements.prepareStockLabels.disabled = !elements.stockLabelReauth.hidden;
-    elements.prepareStockLabels.textContent = "Prepare MAIN stock labels";
+    elements.refreshAndPrepareStockLabels.disabled = !elements.stockLabelReauth.hidden;
+    elements.prepareStockLabels.textContent = "Use stored stock";
+    elements.refreshAndPrepareStockLabels.textContent = "Refresh stock first";
     updateAssignmentSummary();
     updateSummary();
   }
 }
 
-elements.prepareStockLabels.addEventListener("click", prepareAssignedStockLabels);
+elements.prepareStockLabels.addEventListener("click", () => prepareAssignedStockLabels(false));
+elements.refreshAndPrepareStockLabels.addEventListener("click", () => prepareAssignedStockLabels(true));
 document.querySelector("#stock-label-reauth").addEventListener("submit", async (event) => {
   event.preventDefault();
   const pinInput = document.querySelector("#stock-label-pin");
@@ -1195,7 +1225,8 @@ document.querySelector("#stock-label-reauth").addEventListener("submit", async (
     elements.stockLabelReauth.hidden = true;
     elements.stockLabelError.hidden = true;
     elements.prepareStockLabels.disabled = false;
-    await prepareAssignedStockLabels();
+    elements.refreshAndPrepareStockLabels.disabled = false;
+    await prepareAssignedStockLabels(state.stockLabelRefreshRequested);
   } catch (error) {
     elements.stockLabelReauthError.textContent = error.message;
     elements.stockLabelReauthError.hidden = false;
