@@ -338,6 +338,86 @@ def refresh_barcode_assignment_targets(
     return refreshed
 
 
+def plan_entered_barcodes(
+    entries: list[dict],
+    current_items: dict[str, dict],
+    stock_items: list[dict],
+) -> list[dict]:
+    used_by_barcode: dict[str, set[str]] = {}
+    for item in stock_items:
+        item_code = item["item_code"].upper()
+        for alternate_id in item.get("alternate_ids", set()):
+            value = str(alternate_id or "").strip()
+            if value and value.casefold() != "x":
+                used_by_barcode.setdefault(value.casefold(), set()).add(item_code)
+
+    planned: list[dict] = []
+    proposed: set[str] = set()
+    for entry in entries:
+        requested_code = entry["item_code"].upper()
+        barcode = entry["barcode"].strip()
+        barcode_key = barcode.casefold()
+        item = current_items.get(requested_code)
+        if not item:
+            raise BarcodeAssignmentConflict(
+                f"{entry['item_code']} was not found in the final MYOB check"
+            )
+        if item.get("status") not in {"", "Active"}:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} is no longer an active stock item"
+            )
+        if item.get("barcode_reference_count", 0) > 1:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} has multiple Barcode rows; clean these up in MYOB first"
+            )
+
+        current_value = str(item.get("barcode_reference_value") or "").strip()
+        current_missing = not current_value or current_value.casefold() == "x"
+        if not current_missing and current_value.casefold() != barcode_key:
+            raise BarcodeAssignmentConflict(
+                f"{item['item_code']} already has barcode {current_value}; it was not overwritten"
+            )
+
+        owners = used_by_barcode.get(barcode_key, set())
+        other_owners = sorted(owner for owner in owners if owner != requested_code)
+        if other_owners:
+            raise BarcodeAssignmentConflict(
+                f"Barcode {barcode} is already used by {', '.join(other_owners)}"
+            )
+        item_alternate_ids = {
+            str(value or "").strip().casefold()
+            for value in item.get("alternate_ids", set())
+            if str(value or "").strip()
+        }
+        if current_missing and barcode_key in item_alternate_ids:
+            raise BarcodeAssignmentConflict(
+                f"Barcode {barcode} already exists as another cross-reference on {item['item_code']}"
+            )
+        if barcode_key in proposed:
+            raise BarcodeAssignmentConflict(
+                f"Barcode {barcode} appears more than once in this batch"
+            )
+
+        planned.append(
+            {
+                "item_code": item["item_code"],
+                "description": item["description"],
+                "barcode": barcode,
+                "action": (
+                    "unchanged"
+                    if not current_missing
+                    else "replace"
+                    if item.get("barcode_reference_id")
+                    else "create"
+                ),
+                "previous_barcode": item.get("barcode_reference_value"),
+                "cross_reference_id": item.get("barcode_reference_id"),
+            }
+        )
+        proposed.add(barcode_key)
+    return planned
+
+
 @dataclass
 class MyobClient:
     settings: Settings

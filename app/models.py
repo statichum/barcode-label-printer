@@ -106,3 +106,44 @@ class BarcodeAssignmentPreviewRequest(BaseModel):
 
 class BarcodeAssignmentCommitRequest(BaseModel):
     preview_token: str = Field(min_length=20, max_length=200)
+
+
+class BarcodeEntryItemRequest(BaseModel):
+    item_code: str = Field(min_length=1, max_length=80)
+    barcode: str = Field(min_length=4, max_length=40)
+
+    @field_validator("item_code")
+    @classmethod
+    def clean_item_code(cls, value: str) -> str:
+        code = value.strip().upper()
+        if not code or any(ord(char) < 32 for char in code):
+            raise ValueError("Enter a valid item code")
+        return code
+
+    @field_validator("barcode")
+    @classmethod
+    def clean_barcode(cls, value: str) -> str:
+        barcode = value.strip()
+        if not re.fullmatch(r"[0-9A-Za-z._/+%$-]{4,40}", barcode):
+            raise ValueError(
+                "Barcodes may contain letters, numbers, dots, slashes, plus, "
+                "percent, dollar signs, or hyphens"
+            )
+        return barcode
+
+
+class BarcodeEntryCommitRequest(BaseModel):
+    entries: list[BarcodeEntryItemRequest] = Field(min_length=1, max_length=350)
+
+    @field_validator("entries")
+    @classmethod
+    def reject_duplicate_entries(
+        cls, values: list[BarcodeEntryItemRequest]
+    ) -> list[BarcodeEntryItemRequest]:
+        item_codes = [item.item_code for item in values]
+        if len(set(item_codes)) != len(item_codes):
+            raise ValueError("Each item may appear only once in a barcode batch")
+        barcodes = [item.barcode.casefold() for item in values]
+        if len(set(barcodes)) != len(barcodes):
+            raise ValueError("Each scanned barcode may appear only once in a batch")
+        return values

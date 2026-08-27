@@ -3,6 +3,7 @@ import pytest
 
 from app.database import CatalogItem
 from app.myob import (
+    BarcodeAssignmentConflict,
     MyobClient,
     MyobError,
     ean13_internal_barcode,
@@ -10,6 +11,7 @@ from app.myob import (
     merge_catalog_items,
     merge_purchase_order,
     plan_barcode_assignments,
+    plan_entered_barcodes,
     stock_item_from_myob,
     validate_barcode_assignments,
 )
@@ -224,6 +226,78 @@ def test_assignment_plan_replaces_existing_barcode_row():
     assert assignments[0]["action"] == "replace"
     assert assignments[0]["cross_reference_id"] == "xref-id"
     assert assignments[0]["previous_barcode"] == "9412345678901"
+
+
+def test_entered_barcode_plan_replaces_x_but_not_a_real_barcode():
+    placeholder = {
+        "item_code": "NEW",
+        "description": "New product",
+        "barcode": None,
+        "barcode_reference_id": "xref-x",
+        "barcode_reference_value": "x",
+        "barcode_reference_count": 1,
+        "status": "Active",
+        "alternate_ids": {"x"},
+    }
+
+    planned = plan_entered_barcodes(
+        [{"item_code": "NEW", "barcode": "012345678905"}],
+        {"NEW": placeholder},
+        [placeholder],
+    )
+
+    assert planned[0]["action"] == "replace"
+    assert planned[0]["cross_reference_id"] == "xref-x"
+
+    existing = {
+        **placeholder,
+        "barcode": "9412345678901",
+        "barcode_reference_value": "9412345678901",
+        "alternate_ids": {"9412345678901"},
+    }
+    unchanged = plan_entered_barcodes(
+        [{"item_code": "NEW", "barcode": "9412345678901"}],
+        {"NEW": existing},
+        [existing],
+    )
+    assert unchanged[0]["action"] == "unchanged"
+
+    with pytest.raises(BarcodeAssignmentConflict, match="was not overwritten"):
+        plan_entered_barcodes(
+            [{"item_code": "NEW", "barcode": "012345678905"}],
+            {"NEW": existing},
+            [existing],
+        )
+
+
+def test_entered_barcode_plan_rejects_a_value_used_by_another_item():
+    target = {
+        "item_code": "TARGET",
+        "description": "Target",
+        "barcode": None,
+        "barcode_reference_id": None,
+        "barcode_reference_value": None,
+        "barcode_reference_count": 0,
+        "status": "Active",
+        "alternate_ids": set(),
+    }
+    owner = {
+        **target,
+        "item_code": "OWNER",
+        "description": "Owner",
+        "barcode": "012345678905",
+        "barcode_reference_id": "owner-xref",
+        "barcode_reference_value": "012345678905",
+        "barcode_reference_count": 1,
+        "alternate_ids": {"012345678905"},
+    }
+
+    with pytest.raises(BarcodeAssignmentConflict, match="already used by OWNER"):
+        plan_entered_barcodes(
+            [{"item_code": "TARGET", "barcode": "012345678905"}],
+            {"TARGET": target},
+            [target, owner],
+        )
 
 
 def test_stock_item_lookup_calls_myob_with_cross_references(tmp_path):

@@ -21,6 +21,7 @@ from .models import (
     BarcodeAdminLoginRequest,
     BarcodeAssignmentCommitRequest,
     BarcodeAssignmentPreviewRequest,
+    BarcodeEntryCommitRequest,
     ManualItemLookupRequest,
     PrintRequest,
     PurchaseOrderLookupRequest,
@@ -33,6 +34,7 @@ from .myob import (
     PurchaseOrderNotFound,
     merge_catalog_items,
     merge_purchase_order,
+    plan_entered_barcodes,
     refresh_barcode_assignment_targets,
     validate_barcode_assignments,
 )
@@ -53,7 +55,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.6.1",
+    version="1.7.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -67,6 +69,7 @@ barcode_assignment_previews: dict[str, dict] = {}
 barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0}
 barcode_admin_lock = threading.Lock()
 barcode_catalog_refresh_lock = threading.Lock()
+barcode_entry_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
 
 
@@ -168,6 +171,32 @@ def _public_assignment_catalog(items: list[dict]) -> list[dict]:
         for item in items
         if item.get("status") == "Active"
     ]
+
+
+def _public_barcode_entry_catalog(items: list[dict]) -> list[dict]:
+    public_items = []
+    for item in items:
+        if item.get("status") != "Active":
+            continue
+        barcode_value = str(item.get("barcode_reference_value") or "").strip()
+        has_barcode = bool(barcode_value and barcode_value.casefold() != "x")
+        duplicate_rows = item.get("barcode_reference_count", 0) > 1
+        public_items.append(
+            {
+                "item_code": item["item_code"],
+                "description": item["description"],
+                "barcode": item.get("barcode"),
+                "barcode_entry_allowed": not has_barcode and not duplicate_rows,
+                "warning": (
+                    "Multiple Barcode rows must be cleaned up in MYOB"
+                    if duplicate_rows
+                    else f"Already has barcode {barcode_value}"
+                    if has_barcode
+                    else None
+                ),
+            }
+        )
+    return public_items
 
 
 def load_assignment_catalog(refresh: bool = False) -> tuple[list[dict], float]:
@@ -289,6 +318,96 @@ def barcode_admin_items(
         logger.warning("MYOB barcode catalog lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"items": _public_assignment_catalog(items), "stored_at": stored_at}
+
+
+@app.get("/api/barcode-entry/items")
+def barcode_entry_items(refresh: bool = False):
+    try:
+        items, stored_at = load_assignment_catalog(refresh=refresh)
+    except MyobError as exc:
+        logger.warning("MYOB barcode entry catalogue lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"items": _public_barcode_entry_catalog(items), "stored_at": stored_at}
+
+
+@app.post("/api/barcode-entry/commit")
+def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
+    if not settings.barcode_assignment_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Barcode writes are disabled; set "
+                "BARCODE_ASSIGNMENT_ENABLED=true to enable them"
+            ),
+        )
+
+    with barcode_entry_lock:
+        try:
+            catalogue, _ = load_assignment_catalog()
+            current_items = myob.get_assignment_stock_items(
+                [entry.item_code for entry in request.entries]
+            )
+            validation_items = [
+                current_items.get(item["item_code"].upper(), item)
+                for item in catalogue
+            ]
+            planned = plan_entered_barcodes(
+                [entry.model_dump() for entry in request.entries],
+                current_items,
+                validation_items,
+            )
+        except BarcodeAssignmentConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except MyobError as exc:
+            logger.warning("Final MYOB barcode entry check failed: %s", exc)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        written = []
+        try:
+            for entry in planned:
+                if entry["action"] == "unchanged":
+                    continue
+                myob.assign_barcode(
+                    entry["item_code"],
+                    entry["barcode"],
+                    entry.get("cross_reference_id"),
+                )
+                written.append(entry)
+            verified = myob.get_assignment_stock_items(
+                [entry["item_code"] for entry in planned]
+            )
+            failed_verification = [
+                entry["item_code"]
+                for entry in planned
+                if verified.get(entry["item_code"].upper()) is None
+                or verified[entry["item_code"].upper()].get("barcode")
+                != entry["barcode"]
+            ]
+            if failed_verification:
+                raise MyobError(
+                    "MYOB did not return the entered barcode for: "
+                    + ", ".join(failed_verification)
+                )
+        except MyobError as exc:
+            logger.exception(
+                "Direct barcode entry failed after %s successful writes", len(written)
+            )
+            suffix = (
+                f" {len(written)} item(s) were already updated; refresh before retrying."
+                if written
+                else ""
+            )
+            raise HTTPException(
+                status_code=502, detail=f"{exc}.{suffix}".strip()
+            ) from exc
+
+        update_stored_assignment_catalog(verified)
+        logger.info("Entered MYOB barcodes for %s item(s)", len(planned))
+        return {
+            "entered": planned,
+            "count": len(planned),
+            "written_count": len(written),
+        }
 
 
 @app.post("/api/barcode-admin/unlock-large-batches")

@@ -4,6 +4,8 @@ from pydantic import ValidationError
 from app.models import (
     BarcodeAdminLoginRequest,
     BarcodeAssignmentPreviewRequest,
+    BarcodeEntryCommitRequest,
+    BarcodeEntryItemRequest,
     ManualItemLookupRequest,
     PrintItemRequest,
     PrintRequest,
@@ -72,3 +74,29 @@ def test_barcode_admin_pin_requires_digits():
     request = BarcodeAdminLoginRequest(pin="2468")
 
     assert request.pin == "2468"
+
+
+def test_entered_barcode_preserves_leading_zeroes_and_normalizes_item_code():
+    request = BarcodeEntryItemRequest(
+        item_code=" product-1 ", barcode=" 012345678905 "
+    )
+
+    assert request.item_code == "PRODUCT-1"
+    assert request.barcode == "012345678905"
+
+
+def test_entered_barcode_batch_rejects_duplicate_items_and_barcodes():
+    with pytest.raises(ValidationError, match="Each item may appear only once"):
+        BarcodeEntryCommitRequest(
+            entries=[
+                BarcodeEntryItemRequest(item_code="ITEM1", barcode="012345678905"),
+                BarcodeEntryItemRequest(item_code="item1", barcode="9412345678901"),
+            ]
+        )
+    with pytest.raises(ValidationError, match="Each scanned barcode"):
+        BarcodeEntryCommitRequest(
+            entries=[
+                BarcodeEntryItemRequest(item_code="ITEM1", barcode="ABC-1234"),
+                BarcodeEntryItemRequest(item_code="ITEM2", barcode="abc-1234"),
+            ]
+        )

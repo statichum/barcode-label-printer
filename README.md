@@ -10,8 +10,11 @@ The operator can:
 - review the order's inventory lines, selected by default;
 - review purchase-order labels in natural item-code order by default, with MYOB line order still available;
 - exclude lines or change label quantities;
-- add item codes and quantities manually; and
+- add item codes and quantities manually;
+- enter existing manufacturer barcodes directly against active MYOB stock items; and
 - print the item description, item code, and scannable Code 128 barcode.
+
+The **Enter barcodes** tab shares the stored active-stock catalogue and manual MYOB refresh used by **Assign barcodes**, but does not require the administration PIN. Search or filter the list, tap an item, scan its existing manufacturer barcode, and add it to a batch before choosing **Send to MYOB**. Real barcode values are never silently overwritten; missing rows are created and `x` placeholders are replaced. Each batch is checked for duplicate barcode values, re-reads its selected items immediately before writing, and reads them back afterward to verify MYOB stored the expected values. A partial failure leaves the browser batch intact so it can be refreshed and safely retried.
 
 The **Assign barcodes** tab is protected by a server-configured PIN. It loads active MYOB stock items for local code/description searching, shows each current Barcode cross-reference, previews generated internal EAN-13 values, rechecks the stored active-item snapshot for collisions, and then updates MYOB. The snapshot is stored in `data/barcode-stock-items.json`, survives container restarts, and changes only after a manual refresh or successful assignment. Concurrent refresh requests share one MYOB catalogue load. Review uses this local snapshot rather than downloading the catalogue again. Barcode numbers are allocated separately by a persistent, atomically locked high-water counter in `data/barcode-sequence.json`. Immediately before writing, confirmation reads only the selected items from MYOB so current Barcode row IDs are used; those items are read back again after writing for verification. An existing Barcode detail row—including an `x` placeholder—is deleted by its MYOB detail `id` and replaced in the same PUT; a new row is appended only when no Barcode row exists.
 
@@ -27,6 +30,7 @@ MYOB supplies the PO item codes and ordered quantities. Descriptions are read fr
 
 - `PRINT_ENABLED=false` is the default. Jobs are written to `spool/` but not transmitted.
 - `BARCODE_ASSIGNMENT_ENABLED=false` is the default. Barcode previews work, but MYOB writes remain blocked until the setting is explicitly enabled.
+- The unprotected **Enter barcodes** tab can write only when `BARCODE_ASSIGNMENT_ENABLED=true`. As requested it has no PIN prompt, so access to the web app must remain restricted to trusted warehouse staff.
 - The SATO is identified by `PRINTER_MAC`, not its DHCP address.
 - The last working address is cached under `data/` and checked before another LAN scan.
 - A print uses three complete discovery/connect/send attempts by default. Failed attempts force fresh MAC discovery so a sleeping printer or temporarily closed port can recover.

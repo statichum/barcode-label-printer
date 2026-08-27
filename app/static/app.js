@@ -13,6 +13,11 @@ const state = {
   assignmentStoredAt: null,
   assignmentLargeBatchUnlocked: false,
   lastAssignedItems: [],
+  barcodeEntryItems: [],
+  barcodeEntryStoredAt: null,
+  barcodeEntrySelected: null,
+  barcodeEntryPending: new Map(),
+  barcodeEntrySending: false,
 };
 
 const elements = {
@@ -40,6 +45,23 @@ const elements = {
   printerStatus: document.querySelector("#printer-status"),
   toast: document.querySelector("#toast"),
   sortControl: document.querySelector("#sort-control"),
+  barcodeEntrySearch: document.querySelector("#barcode-entry-search"),
+  barcodeEntryMissingOnly: document.querySelector("#barcode-entry-missing-only"),
+  barcodeEntryMeta: document.querySelector("#barcode-entry-meta"),
+  barcodeEntryItemList: document.querySelector("#barcode-entry-item-list"),
+  barcodeEntryLoading: document.querySelector("#barcode-entry-loading"),
+  barcodeEntryLoadingTitle: document.querySelector("#barcode-entry-loading-title"),
+  refreshBarcodeEntryItems: document.querySelector("#refresh-barcode-entry-items"),
+  clearBarcodeEntryBatch: document.querySelector("#clear-barcode-entry-batch"),
+  barcodeEntryQueue: document.querySelector("#barcode-entry-queue"),
+  barcodeEntryCount: document.querySelector("#barcode-entry-count"),
+  sendEnteredBarcodes: document.querySelector("#send-entered-barcodes"),
+  barcodeEntryDialog: document.querySelector("#barcode-entry-dialog"),
+  barcodeEntryForm: document.querySelector("#barcode-entry-form"),
+  barcodeEntryItemCode: document.querySelector("#barcode-entry-item-code"),
+  barcodeEntryDescription: document.querySelector("#barcode-entry-description"),
+  barcodeEntryValue: document.querySelector("#barcode-entry-value"),
+  barcodeEntryError: document.querySelector("#barcode-entry-error"),
   assignLocked: document.querySelector("#assign-locked"),
   assignWorkspace: document.querySelector("#assign-workspace"),
   assignSearch: document.querySelector("#assign-search"),
@@ -195,6 +217,9 @@ function switchMode(mode) {
   if (mode === "assign") {
     elements.results.hidden = true;
     showAssignmentAccess();
+  } else if (mode === "entry") {
+    elements.results.hidden = true;
+    showBarcodeEntry();
   } else {
     if (state.items.length) elements.results.hidden = false;
     (mode === "po" ? elements.poNumber : elements.itemCode).focus();
@@ -470,6 +495,236 @@ elements.printButton.addEventListener("click", async () => {
   } finally {
     state.busy = false;
     updateSummary();
+  }
+});
+
+function barcodeEntryMatches(item, query) {
+  if (elements.barcodeEntryMissingOnly.checked && item.barcode) return false;
+  if (!query) return true;
+  return item.item_code.toLocaleLowerCase().includes(query)
+    || item.description.toLocaleLowerCase().includes(query)
+    || String(item.barcode || "").toLocaleLowerCase().includes(query);
+}
+
+function filteredBarcodeEntryItems() {
+  const query = elements.barcodeEntrySearch.value.trim().toLocaleLowerCase();
+  return state.barcodeEntryItems
+    .filter((item) => barcodeEntryMatches(item, query))
+    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
+}
+
+function updateBarcodeEntrySummary() {
+  const count = state.barcodeEntryPending.size;
+  elements.barcodeEntryCount.textContent = `${count} barcode${count === 1 ? "" : "s"} ready`;
+  elements.sendEnteredBarcodes.disabled = state.busy || count === 0;
+  elements.sendEnteredBarcodes.textContent = state.barcodeEntrySending
+    ? "Sending to MYOB…"
+    : count
+    ? `Send ${count} to MYOB`
+    : "Send to MYOB";
+  elements.clearBarcodeEntryBatch.disabled = state.busy || count === 0;
+}
+
+function renderBarcodeEntryQueue() {
+  elements.barcodeEntryQueue.replaceChildren();
+  const entries = [...state.barcodeEntryPending.values()]
+    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
+  elements.barcodeEntryQueue.hidden = entries.length === 0;
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "barcode-entry-queue-row";
+    row.innerHTML = "<div><b></b><small></small></div><code></code><button type=\"button\" class=\"text-button\">Remove</button>";
+    row.querySelector("b").textContent = entry.item_code;
+    row.querySelector("small").textContent = entry.description;
+    row.querySelector("code").textContent = entry.barcode;
+    row.querySelector("button").addEventListener("click", () => {
+      state.barcodeEntryPending.delete(entry.item_code);
+      renderBarcodeEntryItems();
+    });
+    elements.barcodeEntryQueue.append(row);
+  }
+}
+
+function selectBarcodeEntryItem(item) {
+  if (!item.barcode_entry_allowed) return;
+  state.barcodeEntrySelected = item;
+  const pending = state.barcodeEntryPending.get(item.item_code);
+  elements.barcodeEntryItemCode.textContent = item.item_code;
+  elements.barcodeEntryDescription.textContent = item.description;
+  elements.barcodeEntryValue.value = pending ? pending.barcode : "";
+  elements.barcodeEntryError.hidden = true;
+  elements.barcodeEntryError.textContent = "";
+  if (!elements.barcodeEntryDialog.open) elements.barcodeEntryDialog.showModal();
+  setTimeout(() => {
+    elements.barcodeEntryValue.focus();
+    elements.barcodeEntryValue.select();
+  }, 0);
+}
+
+function renderBarcodeEntryItems() {
+  const matches = filteredBarcodeEntryItems();
+  const visible = matches.slice(0, 250);
+  elements.barcodeEntryItemList.replaceChildren();
+
+  for (const item of visible) {
+    const pending = state.barcodeEntryPending.has(item.item_code);
+    const selectable = item.barcode_entry_allowed;
+    const row = document.createElement("article");
+    row.className = `assign-item-row barcode-entry-row ${selectable ? "" : "existing"}`;
+    row.innerHTML = `
+      <div class="entry-action"><span class="secondary-button"></span></div>
+      <div><b></b><code></code></div>
+      <div class="assign-current-barcode"><code></code><small></small></div>`;
+    const action = row.querySelector(".entry-action .secondary-button");
+    action.textContent = pending ? "Edit" : selectable ? "Enter" : "Unavailable";
+    row.querySelector("b").textContent = item.description;
+    row.querySelectorAll("code")[0].textContent = item.item_code;
+    const barcode = row.querySelector(".assign-current-barcode code");
+    barcode.textContent = pending
+      ? state.barcodeEntryPending.get(item.item_code).barcode
+      : item.barcode || "No barcode";
+    barcode.classList.toggle("missing-barcode", !item.barcode && !pending);
+    const warning = row.querySelector("small");
+    warning.textContent = pending ? "Ready to send" : item.warning || "";
+    warning.hidden = !warning.textContent;
+    if (selectable) {
+      row.classList.add("selectable");
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", `Enter a barcode for ${item.item_code}`);
+      row.addEventListener("click", () => selectBarcodeEntryItem(item));
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectBarcodeEntryItem(item);
+        }
+      });
+    }
+    elements.barcodeEntryItemList.append(row);
+  }
+
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "assign-empty";
+    empty.textContent = "No active stock items match this search.";
+    elements.barcodeEntryItemList.append(empty);
+  }
+  const limitCopy = matches.length > visible.length ? ` · showing first ${visible.length}` : "";
+  const storedCopy = state.barcodeEntryStoredAt
+    ? ` · refreshed ${new Date(state.barcodeEntryStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
+    : "";
+  elements.barcodeEntryMeta.textContent = `${matches.length} matching of ${state.barcodeEntryItems.length} active items${limitCopy}${storedCopy}`;
+  renderBarcodeEntryQueue();
+  updateBarcodeEntrySummary();
+}
+
+async function loadBarcodeEntryItems(refresh = false) {
+  state.busy = true;
+  elements.barcodeEntryLoading.hidden = false;
+  elements.barcodeEntryLoadingTitle.textContent = refresh
+    ? "Refreshing stock items from MYOB…"
+    : "Loading the stock-item catalogue…";
+  elements.refreshBarcodeEntryItems.disabled = true;
+  elements.refreshBarcodeEntryItems.textContent = refresh ? "Refreshing…" : "Loading…";
+  updateBarcodeEntrySummary();
+  try {
+    const response = await api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`);
+    state.barcodeEntryItems = response.items;
+    state.barcodeEntryStoredAt = response.stored_at;
+    renderBarcodeEntryItems();
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    elements.barcodeEntryLoading.hidden = true;
+    elements.refreshBarcodeEntryItems.disabled = false;
+    elements.refreshBarcodeEntryItems.textContent = "↻ Refresh from MYOB";
+    updateBarcodeEntrySummary();
+  }
+}
+
+function showBarcodeEntry() {
+  if (!state.barcodeEntryItems.length) loadBarcodeEntryItems(false);
+  else {
+    renderBarcodeEntryItems();
+    elements.barcodeEntrySearch.focus();
+  }
+}
+
+elements.barcodeEntrySearch.addEventListener("input", renderBarcodeEntryItems);
+elements.barcodeEntryMissingOnly.addEventListener("change", renderBarcodeEntryItems);
+elements.refreshBarcodeEntryItems.addEventListener("click", () => loadBarcodeEntryItems(true));
+elements.clearBarcodeEntryBatch.addEventListener("click", () => {
+  state.barcodeEntryPending.clear();
+  renderBarcodeEntryItems();
+});
+document.querySelector("#barcode-entry-close").addEventListener("click", () => {
+  elements.barcodeEntryDialog.close();
+});
+elements.barcodeEntryValue.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  elements.barcodeEntryForm.requestSubmit();
+});
+elements.barcodeEntryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const item = state.barcodeEntrySelected;
+  if (!item) return;
+  const barcode = elements.barcodeEntryValue.value.trim();
+  const duplicate = [...state.barcodeEntryPending.values()].find(
+    (entry) => entry.item_code !== item.item_code
+      && entry.barcode.toLocaleLowerCase() === barcode.toLocaleLowerCase()
+  );
+  if (duplicate) {
+    elements.barcodeEntryError.textContent = `That barcode is already queued for ${duplicate.item_code}.`;
+    elements.barcodeEntryError.hidden = false;
+    elements.barcodeEntryValue.select();
+    return;
+  }
+  state.barcodeEntryPending.set(item.item_code, {
+    item_code: item.item_code,
+    description: item.description,
+    barcode,
+  });
+  elements.barcodeEntryDialog.close();
+  state.barcodeEntrySelected = null;
+  renderBarcodeEntryItems();
+});
+elements.sendEnteredBarcodes.addEventListener("click", async () => {
+  if (!state.barcodeEntryPending.size || state.busy) return;
+  clearMessage();
+  state.busy = true;
+  state.barcodeEntrySending = true;
+  updateBarcodeEntrySummary();
+  try {
+    const result = await api("/api/barcode-entry/commit", {
+      method: "POST",
+      body: JSON.stringify({
+        entries: [...state.barcodeEntryPending.values()].map((entry) => ({
+          item_code: entry.item_code,
+          barcode: entry.barcode,
+        })),
+      }),
+    });
+    const enteredByCode = new Map(
+      result.entered.map((entry) => [entry.item_code, entry.barcode])
+    );
+    state.barcodeEntryItems.forEach((item) => {
+      if (!enteredByCode.has(item.item_code)) return;
+      item.barcode = enteredByCode.get(item.item_code);
+      item.barcode_entry_allowed = false;
+      item.warning = `Already has barcode ${item.barcode}`;
+    });
+    state.barcodeEntryPending.clear();
+    renderBarcodeEntryItems();
+    showToast(`${result.count} product barcode${result.count === 1 ? "" : "s"} saved to MYOB.`);
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    state.barcodeEntrySending = false;
+    renderBarcodeEntryItems();
   }
 });
 

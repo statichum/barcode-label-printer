@@ -14,6 +14,8 @@ def test_home_page_declares_web_app_icons():
     assert 'rel="apple-touch-icon"' in response.text
     assert 'name="apple-mobile-web-app-capable" content="yes"' in response.text
     assert 'id="stock-label-reauth"' in response.text
+    assert 'id="entry-tab"' in response.text
+    assert 'id="barcode-entry-form"' in response.text
 
 
 def test_web_app_manifest_and_icons_are_served():
@@ -42,3 +44,10 @@ def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
     assert 'sortMode: "natural"' in script
     assert 'state.sortMode = "natural";' in script
     assert "state.items.forEach((item) => { item.selected = false; });\n    rerenderCurrentResults();" in script
+
+
+def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints():
+    script = client.get("/static/app.js").text
+
+    assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
+    assert 'api("/api/barcode-entry/commit"' in script

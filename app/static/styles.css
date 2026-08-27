@@ -109,7 +109,7 @@ button { color: inherit; }
   box-shadow: var(--shadow);
 }
 
-.mode-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+.mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
 .mode-tab {
   position: relative;
   min-height: 68px;
@@ -168,6 +168,7 @@ button { color: inherit; }
 .selection-tools { display: flex; align-items: center; gap: 8px; color: #9aaaa4; white-space: nowrap; }
 .result-tools { display: flex; align-items: center; gap: 18px; }
 .text-button { padding: 4px; border: 0; background: transparent; color: var(--forest); font-size: 12px; font-weight: 750; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.text-button:disabled { cursor: not-allowed; opacity: .4; }
 .sort-control { display: inline-flex; padding: 3px; border: 1px solid #c7d1ca; border-radius: 5px; background: #eef1ec; }
 .sort-control button { min-height: 34px; padding: 0 12px; border: 0; border-radius: 3px; background: transparent; color: var(--ink-muted); font-size: 11px; font-weight: 800; cursor: pointer; }
 .sort-control button.active { background: var(--surface); color: var(--forest); box-shadow: 0 2px 8px rgba(23, 52, 45, .1); }
@@ -247,6 +248,20 @@ button { color: inherit; }
 .assign-current-barcode code { margin: 0; color: var(--ink); }
 .assign-current-barcode .missing-barcode { color: var(--danger); }
 .assign-item-row.existing { background: #fafaf7; }
+.barcode-entry-row.selectable { cursor: pointer; }
+.barcode-entry-row.selectable:hover, .barcode-entry-row.selectable:focus-visible { background: #f0f7f3; outline: 0; box-shadow: inset 4px 0 var(--forest); }
+.barcode-entry-row .entry-action { align-items: center; }
+.barcode-entry-row .entry-action .secondary-button { min-height: 38px; display: inline-flex; align-items: center; padding: 0 12px; font-size: 11px; }
+.barcode-entry-row.existing .entry-action .secondary-button { opacity: .5; }
+.assign-current-barcode small { margin-top: 5px; color: var(--ink-muted); font-size: 10px; }
+.barcode-entry-queue { padding: 14px 30px; border-top: 1px solid var(--line); background: #f7f7f2; }
+.barcode-entry-queue[hidden] { display: none; }
+.barcode-entry-queue::before { content: "READY TO SEND"; display: block; margin-bottom: 8px; color: #73847e; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
+.barcode-entry-queue-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 18px; padding: 9px 12px; border-top: 1px solid var(--line); background: white; }
+.barcode-entry-queue-row:first-of-type { border-top: 0; }
+.barcode-entry-queue-row b, .barcode-entry-queue-row small { display: block; }
+.barcode-entry-queue-row small { margin-top: 3px; overflow: hidden; color: var(--ink-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.barcode-entry-queue-row code { font: 750 12px ui-monospace, monospace; }
 .assign-bar { position: sticky; bottom: 0; min-height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 30px; background: #e8eee9; border-top: 1px solid #cdd7d0; }
 .assign-bar b, .assign-bar small { display: block; }
 .assign-bar small { margin-top: 4px; color: var(--ink-muted); font-size: 10px; }
@@ -315,6 +330,8 @@ button { color: inherit; }
   .assign-table-head, .assign-item-row { grid-template-columns: 54px minmax(0, 1fr); }
   .assign-table-head span:nth-child(3) { display: none; }
   .assign-item-row .assign-current-barcode { grid-column: 2; padding-top: 0; border-left: 0; }
+  .barcode-entry-queue-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .barcode-entry-queue-row code { grid-column: 1; }
 }
 
 @media (max-width: 520px) {
@@ -322,7 +339,7 @@ button { color: inherit; }
   .printer-pill { padding: 8px 11px; }
   .hero h1 { font-size: 44px; }
   .mode-tab { min-height: 60px; padding: 0 14px; }
-  .mode-tab { font-size: 11px; }
+  .mode-tab { padding: 0 8px; font-size: 10px; text-align: center; }
   .tab-number { display: none; }
   .mode-tab.active::after { left: 13px; right: 13px; }
   .results-heading { display: block; padding: 24px 18px 18px; }
@@ -336,6 +353,7 @@ button { color: inherit; }
   .assign-heading { padding: 0 16px; }
   .assign-bar { padding: 14px 16px; }
   .assign-bar .print-button { width: 100%; }
+  .barcode-entry-queue { padding: 12px 16px; }
   .dialog-card { padding: 28px 22px 22px; }
   .dialog-actions { grid-template-columns: 1fr; }
   .dialog-actions .primary-button, .dialog-actions .secondary-button { width: 100%; }
