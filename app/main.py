@@ -58,7 +58,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.11.0",
+    version="1.12.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -880,6 +880,15 @@ def print_labels(request: PrintRequest):
         result["status"],
         result["label_count"],
     )
+    if result.get("delivery"):
+        logger.info(
+            "Print job %s delivered %s of %s bytes in %.3f seconds over %s attempt(s)",
+            result["job_id"],
+            result["delivery"]["bytes_sent"],
+            result["delivery"]["bytes_total"],
+            result["delivery"]["elapsed_seconds"],
+            result["delivery"]["attempts"],
+        )
     return result
 
 

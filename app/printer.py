@@ -19,6 +19,17 @@ class PrinterUnavailable(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class PrinterDelivery:
+    ip: str
+    bytes_sent: int
+    bytes_total: int
+    complete: bool
+    attempts: int
+    elapsed_seconds: float
+    error: str | None = None
+
+
 MAC_PATTERN = re.compile(r"^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$", re.IGNORECASE)
 ARP_LINE_PATTERN = re.compile(
     r"^(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s+"
@@ -147,10 +158,13 @@ class PrinterDiscovery:
                 "message": str(exc),
             }
 
-    def send(self, payload: bytes) -> str:
+    def send(self, payload: bytes) -> PrinterDelivery:
         attempts = max(1, self.settings.printer_send_attempts)
         last_error: OSError | PrinterUnavailable | None = None
+        started_at = time.monotonic()
         for attempt in range(attempts):
+            bytes_sent = 0
+            ip = ""
             try:
                 ip = self.resolve(force_scan=attempt > 0)
                 self._wait_for_port_reopen()
@@ -158,12 +172,45 @@ class PrinterDiscovery:
                     (ip, self.settings.printer_port),
                     timeout=self.settings.printer_connect_timeout_seconds,
                 ) as connection:
-                    connection.sendall(payload)
-                return ip
+                    connection.settimeout(self.settings.printer_send_timeout_seconds)
+                    remaining = memoryview(payload)
+                    while bytes_sent < len(payload):
+                        sent = connection.send(remaining[bytes_sent:])
+                        if sent <= 0:
+                            raise ConnectionError(
+                                "The printer connection closed during transmission"
+                            )
+                        bytes_sent += sent
+                return PrinterDelivery(
+                    ip=ip,
+                    bytes_sent=bytes_sent,
+                    bytes_total=len(payload),
+                    complete=True,
+                    attempts=attempt + 1,
+                    elapsed_seconds=time.monotonic() - started_at,
+                )
             except (OSError, PrinterUnavailable) as exc:
                 last_error = exc
+                if bytes_sent:
+                    logger.error(
+                        "Printer delivery became uncertain after %s of %s bytes; "
+                        "the job will not be retried: %s",
+                        bytes_sent,
+                        len(payload),
+                        exc,
+                    )
+                    return PrinterDelivery(
+                        ip=ip,
+                        bytes_sent=bytes_sent,
+                        bytes_total=len(payload),
+                        complete=False,
+                        attempts=attempt + 1,
+                        elapsed_seconds=time.monotonic() - started_at,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                 logger.warning(
-                    "Printer send attempt %s of %s failed: %s",
+                    "Printer connection attempt %s of %s failed before any "
+                    "print data was sent: %s",
                     attempt + 1,
                     attempts,
                     exc,

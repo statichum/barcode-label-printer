@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=29" />
+    <link rel="stylesheet" href="/static/styles.css?v=30" />
   </head>
   <body>
     <header class="topbar">
@@ -319,13 +319,23 @@
       </form>
     </dialog>
 
-    <dialog id="barcode-entry-send-dialog" class="dialog barcode-entry-send-dialog">
+    <dialog id="barcode-entry-send-dialog" class="dialog blocking-progress-dialog">
       <div class="dialog-card" role="status" aria-live="assertive" aria-atomic="true">
         <span class="loading-spinner" aria-hidden="true"></span>
         <p class="eyebrow">UPDATING MYOB</p>
         <h2>Sending barcodes…</h2>
         <p id="barcode-entry-send-message">MYOB is updating and verifying the selected products.</p>
         <small>Keep this page open. Other barcode functions are paused until this finishes.</small>
+      </div>
+    </dialog>
+
+    <dialog id="print-progress-dialog" class="dialog blocking-progress-dialog">
+      <div class="dialog-card" role="status" aria-live="assertive" aria-atomic="true">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p class="eyebrow">SENDING PRINT JOB</p>
+        <h2>Transmitting labels…</h2>
+        <p id="print-progress-message">The label data is being sent to the printer.</p>
+        <small>The printer may start immediately and continue after transmission finishes. Keep this page open until a result appears.</small>
       </div>
     </dialog>
 
@@ -394,6 +404,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=29" defer></script>
+    <script src="/static/app.js?v=30" defer></script>
   </body>
 </html>

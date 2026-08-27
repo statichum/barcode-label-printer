@@ -37,11 +37,13 @@ MYOB supplies the PO item codes and ordered quantities. Descriptions are read fr
 - The unprotected **Enter barcodes** tab can write only when `BARCODE_ASSIGNMENT_ENABLED=true`. As requested it has no PIN prompt, so access to the web app must remain restricted to trusted warehouse staff.
 - The SATO is identified by `PRINTER_MAC`, not its DHCP address.
 - The last working address is cached under `data/` and checked before another LAN scan.
-- A print uses three complete discovery/connect/send attempts by default. Failed attempts force fresh MAC discovery so a sleeping printer or temporarily closed port can recover.
-- Successful jobs clear the printed selection in the browser to protect against accidental duplicate batches; failed jobs keep it selected for retry.
+- A print retries discovery and connection up to three times only while zero payload bytes have been accepted. Once transmission starts, the job is never automatically repeated because raw port 9100 cannot retract already accepted labels.
+- `PRINTER_CONNECT_TIMEOUT_SECONDS` keeps wake/discovery failures quick. `PRINTER_SEND_TIMEOUT_SECONDS` defaults to 180 seconds so a large batch can feed into the CG4's receive buffer while it is printing.
+- A non-dismissible progress dialog freezes the label UI during transmission, explains that large batches can take several minutes, and warns if the page is closed or reloaded mid-job.
+- Successful and delivery-uncertain jobs clear the printed selection in the browser to protect against accidental duplicate batches. A safe failure before any bytes were sent keeps the selection available for retry.
 - Connections pause for `PRINTER_REOPEN_DELAY_MS` before reopening port 9100, as required by the CG4 LAN interface.
 - Printing uses raw SBPL over TCP port 9100. CUPS is not required.
-- Raw port 9100 confirms that bytes were submitted, but does not provide a durable printer job ID.
+- Raw port 9100 confirms only that bytes were submitted; it does not provide a durable printer job ID or reliable print-complete acknowledgement. If a connection fails after partial transmission, the spool audit records the byte count and the UI tells staff to count the physical output rather than reprint the batch.
 - The UI does not implement user authentication. Keep port 4050 restricted to the trusted warehouse LAN or place it behind the existing authenticated reverse proxy.
 
 ## Ubuntu deployment

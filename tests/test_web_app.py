@@ -72,6 +72,12 @@ def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
     assert 'sortMode: "natural"' in script
     assert 'state.sortMode = "natural";' in script
     assert "state.items.forEach((item) => { item.selected = false; });\n    rerenderCurrentResults();" in script
+    assert 'result.status === "delivery-uncertain"' in script
+    assert "The job was not retried" in script
+    assert "Do not print this batch again" in script
+    assert 'id="print-progress-dialog"' in page
+    assert "Large batches can take several minutes to transmit" in script
+    assert 'elements.printProgressDialog.addEventListener("cancel"' in script
 
 
 def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints():
@@ -99,4 +105,4 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert 'elements.barcodeEntrySendDialog.showModal()' in script
     assert 'elements.barcodeEntrySendDialog.addEventListener("cancel"' in script
     assert 'window.addEventListener("beforeunload"' in script
-    assert "if (state.barcodeEntrySending) return;" in script
+    assert "if (state.barcodeEntrySending || state.printSending) return;" in script

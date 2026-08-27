@@ -338,13 +338,13 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
 .dialog-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 20px; }
 .stock-label-actions { grid-template-columns: minmax(150px, 1fr) auto auto; }
 .dialog-actions .primary-button { width: auto; }
-.barcode-entry-send-dialog { pointer-events: none; }
-.barcode-entry-send-dialog .dialog-card { min-height: 285px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
-.barcode-entry-send-dialog .loading-spinner { width: 42px; height: 42px; margin-bottom: 22px; border-width: 4px; }
-.barcode-entry-send-dialog .eyebrow { margin-bottom: 12px; }
-.barcode-entry-send-dialog h2 { margin: 0; }
-.barcode-entry-send-dialog p:not(.eyebrow) { max-width: 400px; margin: 14px 0 0; }
-.barcode-entry-send-dialog small { max-width: 410px; margin-top: 18px; color: var(--ink-muted); font-size: 11px; line-height: 1.45; }
+.blocking-progress-dialog { pointer-events: none; }
+.blocking-progress-dialog .dialog-card { min-height: 285px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
+.blocking-progress-dialog .loading-spinner { width: 42px; height: 42px; margin-bottom: 22px; border-width: 4px; }
+.blocking-progress-dialog .eyebrow { margin-bottom: 12px; }
+.blocking-progress-dialog h2 { margin: 0; }
+.blocking-progress-dialog p:not(.eyebrow) { max-width: 400px; margin: 14px 0 0; }
+.blocking-progress-dialog small { max-width: 410px; margin-top: 18px; color: var(--ink-muted); font-size: 11px; line-height: 1.45; }
 
 .check-panel { padding: 30px; }
 .barcode-check-listener { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 11px 16px; border: 1px solid #cdd9d2; background: #e8eee9; }

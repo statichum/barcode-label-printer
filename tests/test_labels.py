@@ -1,8 +1,10 @@
+from unittest.mock import MagicMock
+
 from app.database import CatalogItem
 import pytest
 
 from app.labels import ESC, PrintService, build_label, safe_barcode, safe_sbpl_text
-from app.printer import PrinterDiscovery
+from app.printer import PrinterDelivery, PrinterDiscovery
 from tests.helpers import settings
 
 
@@ -121,6 +123,30 @@ def test_dry_run_spools_without_contacting_printer(tmp_path):
     assert result["label_count"] == 2
     assert (config.spool_dir / f"{result['job_id']}.sbpl").exists()
     assert (config.spool_dir / f"{result['job_id']}.json").exists()
+
+
+def test_partial_printer_delivery_is_spooled_as_uncertain_without_raising(tmp_path):
+    config = settings(tmp_path, print_enabled=True)
+    discovery = MagicMock()
+    discovery.send.return_value = PrinterDelivery(
+        ip="10.10.1.16",
+        bytes_sent=4096,
+        bytes_total=8192,
+        complete=False,
+        attempts=1,
+        elapsed_seconds=180.25,
+        error="TimeoutError: timed out",
+    )
+    item = CatalogItem("ABC-1", "Example item", "1234567890123")
+
+    result = PrintService(config, discovery).print_items(
+        [(item, 102)], source="manual", reference=None
+    )
+
+    assert result["status"] == "delivery-uncertain"
+    assert result["delivery"]["complete"] is False
+    assert result["delivery"]["bytes_sent"] == 4096
+    assert (config.spool_dir / f"{result['job_id']}.json").is_file()
 
 
 def test_staff_label_uses_name_and_badge_code(tmp_path):

@@ -255,9 +255,19 @@ class PrintService:
 
         status = "dry-run"
         printer_ip = None
+        delivery_metadata = None
         if self.settings.print_enabled:
-            printer_ip = self.discovery.send(payload)
-            status = "submitted"
+            delivery = self.discovery.send(payload)
+            printer_ip = delivery.ip
+            status = "submitted" if delivery.complete else "delivery-uncertain"
+            delivery_metadata = {
+                "complete": delivery.complete,
+                "bytes_sent": delivery.bytes_sent,
+                "bytes_total": delivery.bytes_total,
+                "attempts": delivery.attempts,
+                "elapsed_seconds": round(delivery.elapsed_seconds, 3),
+                "error": delivery.error,
+            }
 
         metadata = {
             "job_id": job_id,
@@ -277,6 +287,7 @@ class PrintService:
                 "ip": printer_ip,
                 "port": self.settings.printer_port,
             },
+            "delivery": delivery_metadata,
             "host": socket.gethostname(),
         }
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")

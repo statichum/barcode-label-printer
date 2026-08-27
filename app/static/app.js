@@ -26,6 +26,7 @@ const state = {
   barcodeEntrySending: false,
   stockLabelRefreshRequested: false,
   barcodeCheckRequestId: 0,
+  printSending: false,
 };
 
 const elements = {
@@ -112,6 +113,8 @@ const elements = {
   printResultKicker: document.querySelector("#print-result-kicker"),
   printResultTitle: document.querySelector("#print-result-title"),
   printResultMessage: document.querySelector("#print-result-message"),
+  printProgressDialog: document.querySelector("#print-progress-dialog"),
+  printProgressMessage: document.querySelector("#print-progress-message"),
   themeToggle: document.querySelector("#theme-toggle"),
   themeColor: document.querySelector("meta[name='theme-color']"),
   barcodeCheckIdle: document.querySelector("#barcode-check-idle"),
@@ -261,15 +264,15 @@ function showToast(text) {
   }, 5000);
 }
 
-function showPrintResult({ success, title, message }) {
-  elements.printResultKicker.textContent = success ? "PRINT COMPLETE" : "PRINT ERROR";
+function showPrintResult({ success, title, message, kicker = null }) {
+  elements.printResultKicker.textContent = kicker || (success ? "PRINT COMPLETE" : "PRINT ERROR");
   elements.printResultTitle.textContent = title;
   elements.printResultMessage.textContent = message;
   if (!elements.printResultDialog.open) elements.printResultDialog.showModal();
 }
 
 function switchMode(mode) {
-  if (state.barcodeEntrySending) return;
+  if (state.barcodeEntrySending || state.printSending) return;
   state.mode = mode;
   elements.tabs.forEach((tab) => {
     const active = tab.dataset.mode === mode;
@@ -601,9 +604,15 @@ elements.printButton.addEventListener("click", async () => {
     .map((item) => ({ item_code: item.item_code, quantity: quantityValue(item.quantity) }));
   if (!selected.length) return;
 
+  const labelCount = selected.reduce((total, item) => total + item.quantity, 0);
   state.busy = true;
+  state.printSending = true;
   elements.printButton.disabled = true;
   elements.printButtonLabel.textContent = state.printEnabled ? "Sending…" : "Saving…";
+  elements.printProgressMessage.textContent = state.printEnabled
+    ? `Sending ${labelCount} label${labelCount === 1 ? "" : "s"} to the printer. Large batches can take several minutes to transmit.`
+    : `Saving ${labelCount} test label${labelCount === 1 ? "" : "s"} without contacting the printer.`;
+  if (!elements.printProgressDialog.open) elements.printProgressDialog.showModal();
   try {
     const result = await api("/api/print", {
       method: "POST",
@@ -614,18 +623,26 @@ elements.printButton.addEventListener("click", async () => {
       }),
     });
     const submitted = result.status === "submitted";
+    const uncertain = result.status === "delivery-uncertain";
+    if (elements.printProgressDialog.open) elements.printProgressDialog.close();
     showPrintResult({
-      success: true,
-      title: submitted
+      success: !uncertain,
+      kicker: uncertain ? "CHECK PHYSICAL LABELS" : null,
+      title: uncertain
+        ? "Printer delivery could not be fully confirmed."
+        : submitted
         ? "Barcodes sent to printer successfully."
         : "Test print job saved successfully.",
-      message: submitted
-        ? `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} accepted by the printer connection.`
+      message: uncertain
+        ? `The printer accepted ${result.delivery.bytes_sent.toLocaleString("en-NZ")} of ${result.delivery.bytes_total.toLocaleString("en-NZ")} bytes before the connection stopped responding. The job was not retried. Do not print this batch again; count the physical labels and manually print only anything missing. Job ${result.job_id}.`
+        : submitted
+        ? `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} accepted by the printer connection in ${result.delivery.elapsed_seconds.toLocaleString("en-NZ", { maximumFractionDigits: 1 })} seconds. The printer may continue working through its queued labels.`
         : `${result.label_count} label${result.label_count === 1 ? " was" : "s were"} saved as test job ${result.job_id}. Nothing was printed.`,
     });
     state.items.forEach((item) => { item.selected = false; });
     rerenderCurrentResults();
   } catch (error) {
+    if (elements.printProgressDialog.open) elements.printProgressDialog.close();
     showPrintResult({
       success: false,
       title: "Print error",
@@ -633,8 +650,14 @@ elements.printButton.addEventListener("click", async () => {
     });
   } finally {
     state.busy = false;
+    state.printSending = false;
+    if (elements.printProgressDialog.open) elements.printProgressDialog.close();
     updateSummary();
   }
+});
+
+elements.printProgressDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
 });
 
 function matchesSearchTerms(item, query) {
@@ -979,7 +1002,7 @@ elements.barcodeEntrySendDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
 });
 window.addEventListener("beforeunload", (event) => {
-  if (!state.barcodeEntrySending) return;
+  if (!state.barcodeEntrySending && !state.printSending) return;
   event.preventDefault();
   event.returnValue = "";
 });

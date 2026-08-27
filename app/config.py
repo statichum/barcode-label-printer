@@ -44,6 +44,7 @@ class Settings:
     printer_ip_override: str | None
     arp_interface: str
     printer_connect_timeout_seconds: int
+    printer_send_timeout_seconds: int
     printer_reopen_delay_ms: int
     printer_send_attempts: int
     printer_retry_delay_ms: int
@@ -84,6 +85,7 @@ class Settings:
             printer_ip_override=os.getenv("PRINTER_IP_OVERRIDE") or None,
             arp_interface=os.getenv("ARP_INTERFACE", "enp5s0"),
             printer_connect_timeout_seconds=_int("PRINTER_CONNECT_TIMEOUT_SECONDS", 3),
+            printer_send_timeout_seconds=_int("PRINTER_SEND_TIMEOUT_SECONDS", 180),
             printer_reopen_delay_ms=_int("PRINTER_REOPEN_DELAY_MS", 250),
             printer_send_attempts=_int("PRINTER_SEND_ATTEMPTS", 3),
             printer_retry_delay_ms=_int("PRINTER_RETRY_DELAY_MS", 1000),
@@ -122,6 +124,8 @@ class Settings:
             missing.append("PRINTER_DARKNESS (use 1A through 5A)")
         if not 1 <= self.printer_send_attempts <= 10:
             missing.append("PRINTER_SEND_ATTEMPTS (use 1 through 10)")
+        if not 1 <= self.printer_send_timeout_seconds <= 3600:
+            missing.append("PRINTER_SEND_TIMEOUT_SECONDS (use 1 through 3600)")
         if self.printer_retry_delay_ms < 0:
             missing.append("PRINTER_RETRY_DELAY_MS (use zero or greater)")
         if self.barcode_admin_pin and (
