@@ -228,7 +228,7 @@ def test_assignment_plan_replaces_existing_barcode_row():
     assert assignments[0]["previous_barcode"] == "9412345678901"
 
 
-def test_entered_barcode_plan_replaces_x_but_not_a_real_barcode():
+def test_entered_barcode_plan_replaces_x_and_existing_real_barcodes():
     placeholder = {
         "item_code": "NEW",
         "description": "New product",
@@ -262,12 +262,14 @@ def test_entered_barcode_plan_replaces_x_but_not_a_real_barcode():
     )
     assert unchanged[0]["action"] == "unchanged"
 
-    with pytest.raises(BarcodeAssignmentConflict, match="was not overwritten"):
-        plan_entered_barcodes(
-            [{"item_code": "NEW", "barcode": "012345678905"}],
-            {"NEW": existing},
-            [existing],
-        )
+    replacement = plan_entered_barcodes(
+        [{"item_code": "NEW", "barcode": "012345678905"}],
+        {"NEW": existing},
+        [existing],
+    )
+    assert replacement[0]["action"] == "replace"
+    assert replacement[0]["previous_barcode"] == "9412345678901"
+    assert replacement[0]["cross_reference_id"] == "xref-x"
 
 
 def test_entered_barcode_plan_rejects_a_value_used_by_another_item():

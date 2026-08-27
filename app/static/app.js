@@ -498,12 +498,23 @@ elements.printButton.addEventListener("click", async () => {
   }
 });
 
+function matchesSearchTerms(item, query) {
+  const terms = query.split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const searchable = [item.item_code, item.description, item.barcode || ""]
+    .join(" ")
+    .toLocaleLowerCase();
+  return terms.every((term) => searchable.includes(term));
+}
+
+function hasUsableBarcode(item) {
+  const barcode = String(item.barcode || "").trim().toLocaleLowerCase();
+  return Boolean(barcode && barcode !== "x");
+}
+
 function barcodeEntryMatches(item, query) {
-  if (elements.barcodeEntryMissingOnly.checked && item.barcode) return false;
-  if (!query) return true;
-  return item.item_code.toLocaleLowerCase().includes(query)
-    || item.description.toLocaleLowerCase().includes(query)
-    || String(item.barcode || "").toLocaleLowerCase().includes(query);
+  if (elements.barcodeEntryMissingOnly.checked && hasUsableBarcode(item)) return false;
+  return matchesSearchTerms(item, query);
 }
 
 function filteredBarcodeEntryItems() {
@@ -576,7 +587,11 @@ function renderBarcodeEntryItems() {
       <div><b></b><code></code></div>
       <div class="assign-current-barcode"><code></code><small></small></div>`;
     const action = row.querySelector(".entry-action .secondary-button");
-    action.textContent = pending ? "Edit" : selectable ? "Enter" : "Unavailable";
+    action.textContent = pending
+      ? "Edit"
+      : selectable
+      ? hasUsableBarcode(item) ? "Update" : "Enter"
+      : "Unavailable";
     row.querySelector("b").textContent = item.description;
     row.querySelectorAll("code")[0].textContent = item.item_code;
     const barcode = row.querySelector(".assign-current-barcode code");
@@ -713,8 +728,8 @@ elements.sendEnteredBarcodes.addEventListener("click", async () => {
     state.barcodeEntryItems.forEach((item) => {
       if (!enteredByCode.has(item.item_code)) return;
       item.barcode = enteredByCode.get(item.item_code);
-      item.barcode_entry_allowed = false;
-      item.warning = `Already has barcode ${item.barcode}`;
+      item.barcode_entry_allowed = true;
+      item.warning = `Current barcode ${item.barcode} will be replaced`;
     });
     state.barcodeEntryPending.clear();
     renderBarcodeEntryItems();
@@ -741,12 +756,8 @@ function showAssignmentAccess() {
 }
 
 function assignmentMatches(item, query) {
-  const hasUsableBarcode = Boolean(item.barcode && item.barcode.toLocaleLowerCase() !== "x");
-  if (elements.assignMissingOnly.checked && hasUsableBarcode) return false;
-  if (!query) return true;
-  return item.item_code.toLocaleLowerCase().includes(query)
-    || item.description.toLocaleLowerCase().includes(query)
-    || String(item.barcode || "").includes(query);
+  if (elements.assignMissingOnly.checked && hasUsableBarcode(item)) return false;
+  return matchesSearchTerms(item, query);
 }
 
 function updateAssignmentSummary() {

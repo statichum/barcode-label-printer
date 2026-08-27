@@ -35,7 +35,15 @@ def reset_barcode_catalog():
 def test_barcode_entry_catalogue_is_available_without_a_pin(tmp_path, monkeypatch):
     configured = settings(tmp_path)
     myob = MagicMock()
-    myob.list_active_stock_items.return_value = [stock_item("ITEM2"), stock_item("ITEM10")]
+    myob.list_active_stock_items.return_value = [
+        stock_item("ITEM2"),
+        stock_item("ITEM10"),
+        stock_item(
+            "ITEM-X",
+            barcode_reference_id="placeholder-xref",
+            barcode_reference_value="X",
+        ),
+    ]
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     reset_barcode_catalog()
@@ -43,8 +51,15 @@ def test_barcode_entry_catalogue_is_available_without_a_pin(tmp_path, monkeypatc
     response = TestClient(main.app).get("/api/barcode-entry/items?refresh=true")
 
     assert response.status_code == 200
-    assert [item["item_code"] for item in response.json()["items"]] == ["ITEM2", "ITEM10"]
+    assert [item["item_code"] for item in response.json()["items"]] == [
+        "ITEM2",
+        "ITEM10",
+        "ITEM-X",
+    ]
     assert all(item["barcode_entry_allowed"] for item in response.json()["items"])
+    placeholder = response.json()["items"][2]
+    assert placeholder["barcode"] is None
+    assert placeholder["warning"] is None
     myob.list_active_stock_items.assert_called_once_with()
 
 
@@ -86,6 +101,47 @@ def test_barcode_entry_rechecks_replaces_x_and_verifies_without_a_pin(
         "NEW", "012345678905", "placeholder-xref"
     )
     update_catalog.assert_called_once_with({"NEW": verified})
+
+
+def test_barcode_entry_can_replace_an_existing_real_barcode(tmp_path, monkeypatch):
+    configured = settings(tmp_path, barcode_assignment_enabled=True)
+    existing = stock_item(
+        "EXISTING",
+        barcode="9412345678901",
+        barcode_reference_id="existing-xref",
+        barcode_reference_value="9412345678901",
+    )
+    verified = stock_item(
+        "EXISTING",
+        barcode="012345678905",
+        barcode_reference_id="replacement-xref",
+        barcode_reference_value="012345678905",
+    )
+    myob = MagicMock()
+    myob.get_assignment_stock_items.side_effect = [
+        {"EXISTING": existing},
+        {"EXISTING": verified},
+    ]
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    monkeypatch.setattr(main, "load_assignment_catalog", lambda: ([existing], 1.0))
+    monkeypatch.setattr(main, "update_stored_assignment_catalog", MagicMock())
+
+    response = TestClient(main.app).post(
+        "/api/barcode-entry/commit",
+        json={
+            "entries": [
+                {"item_code": "EXISTING", "barcode": "012345678905"}
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entered"][0]["action"] == "replace"
+    assert response.json()["entered"][0]["previous_barcode"] == "9412345678901"
+    myob.assign_barcode.assert_called_once_with(
+        "EXISTING", "012345678905", "existing-xref"
+    )
 
 
 def test_barcode_entry_rejects_a_catalogue_collision_before_writing(

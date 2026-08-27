@@ -373,10 +373,7 @@ def plan_entered_barcodes(
 
         current_value = str(item.get("barcode_reference_value") or "").strip()
         current_missing = not current_value or current_value.casefold() == "x"
-        if not current_missing and current_value.casefold() != barcode_key:
-            raise BarcodeAssignmentConflict(
-                f"{item['item_code']} already has barcode {current_value}; it was not overwritten"
-            )
+        current_matches = not current_missing and current_value.casefold() == barcode_key
 
         owners = used_by_barcode.get(barcode_key, set())
         other_owners = sorted(owner for owner in owners if owner != requested_code)
@@ -389,7 +386,7 @@ def plan_entered_barcodes(
             for value in item.get("alternate_ids", set())
             if str(value or "").strip()
         }
-        if current_missing and barcode_key in item_alternate_ids:
+        if not current_matches and barcode_key in item_alternate_ids:
             raise BarcodeAssignmentConflict(
                 f"Barcode {barcode} already exists as another cross-reference on {item['item_code']}"
             )
@@ -405,7 +402,7 @@ def plan_entered_barcodes(
                 "barcode": barcode,
                 "action": (
                     "unchanged"
-                    if not current_missing
+                    if current_matches
                     else "replace"
                     if item.get("barcode_reference_id")
                     else "create"

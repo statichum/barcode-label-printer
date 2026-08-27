@@ -55,7 +55,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.7.0",
+    version="1.7.1",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -186,11 +186,11 @@ def _public_barcode_entry_catalog(items: list[dict]) -> list[dict]:
                 "item_code": item["item_code"],
                 "description": item["description"],
                 "barcode": item.get("barcode"),
-                "barcode_entry_allowed": not has_barcode and not duplicate_rows,
+                "barcode_entry_allowed": not duplicate_rows,
                 "warning": (
                     "Multiple Barcode rows must be cleaned up in MYOB"
                     if duplicate_rows
-                    else f"Already has barcode {barcode_value}"
+                    else f"Current barcode {barcode_value} will be replaced"
                     if has_barcode
                     else None
                 ),

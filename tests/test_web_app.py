@@ -51,3 +51,5 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
 
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
     assert 'api("/api/barcode-entry/commit"' in script
+    assert "terms.every((term) => searchable.includes(term))" in script
+    assert 'barcode !== "x"' in script
