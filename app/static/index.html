@@ -16,7 +16,7 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=23" />
+    <link rel="stylesheet" href="/static/styles.css?v=24" />
   </head>
   <body>
     <header class="topbar">
@@ -42,10 +42,10 @@
       <section class="workspace" aria-label="Barcode management">
         <div class="mode-tabs" role="tablist" aria-label="Label source">
           <button class="mode-tab active" role="tab" aria-selected="true" aria-controls="po-panel" id="po-tab" data-mode="po">
-            <span class="tab-number">01</span> Purchase order
+            <span class="tab-number">01</span> Print from PO
           </button>
           <button class="mode-tab" role="tab" aria-selected="false" aria-controls="manual-panel" id="manual-tab" data-mode="manual">
-            <span class="tab-number">02</span> Manual entry
+            <span class="tab-number">02</span> Manual Print
           </button>
           <button class="mode-tab" role="tab" aria-selected="false" aria-controls="entry-panel" id="entry-tab" data-mode="entry">
             <span class="tab-number">03</span> Enter barcodes
@@ -101,13 +101,16 @@
           </div>
           <div class="assign-heading">
             <p id="barcode-entry-meta">Loading active stock items…</p>
-            <button id="clear-barcode-entry-batch" class="text-button" type="button">Clear batch</button>
+            <div class="assign-selection-actions">
+              <button id="refresh-barcode-entry-stock" class="text-button" type="button">↻ Refresh stock on hand</button>
+              <button id="clear-barcode-entry-batch" class="text-button" type="button">Clear batch</button>
+            </div>
           </div>
           <div id="barcode-entry-loading" class="assign-loading" role="status" aria-live="polite" hidden>
             <span class="loading-spinner" aria-hidden="true"></span>
             <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small>MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
           </div>
-          <div class="assign-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span></div>
+          <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>On hand</span></div>
           <div id="barcode-entry-item-list" class="assign-item-list"></div>
           <div id="barcode-entry-queue" class="barcode-entry-queue" hidden></div>
           <div class="assign-bar">
@@ -324,6 +327,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=23" defer></script>
+    <script src="/static/app.js?v=24" defer></script>
   </body>
 </html>

@@ -50,9 +50,15 @@ def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
 
 
 def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints():
+    page = client.get("/").text
     script = client.get("/static/app.js").text
 
+    assert "Print from PO" in page
+    assert "Manual Print" in page
+    assert 'id="refresh-barcode-entry-stock"' in page
+    assert "On hand" in page
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
     assert 'api("/api/barcode-entry/commit"' in script
+    assert 'api("/api/barcode-entry/stock-on-hand/refresh"' in script
     assert "terms.every((term) => searchable.includes(term))" in script
     assert 'barcode !== "x"' in script

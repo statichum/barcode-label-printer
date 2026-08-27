@@ -12,6 +12,7 @@ from app.myob import (
     merge_purchase_order,
     plan_barcode_assignments,
     plan_entered_barcodes,
+    stock_item_assignment_view,
     stock_item_from_myob,
     validate_barcode_assignments,
 )
@@ -96,6 +97,28 @@ def test_stock_item_barcode_comes_from_myob_cross_references():
     )
 
     assert item == CatalogItem("BEEN1000", "Been Bar Tape", "0400000001821")
+
+
+def test_assignment_view_separates_barcodes_from_other_cross_references():
+    item = stock_item_assignment_view(
+        {
+            "InventoryID": field("BEEN1000"),
+            "Description": field("Been Bar Tape"),
+            "CrossReferences": [
+                {
+                    "AlternateType": field("Vendor Part Number"),
+                    "AlternateID": field("012345678905"),
+                },
+                {
+                    "AlternateType": field("Barcode"),
+                    "AlternateID": field("9412345678901"),
+                },
+            ],
+        }
+    )
+
+    assert item["alternate_ids"] == {"012345678905", "9412345678901"}
+    assert item["barcode_ids"] == {"9412345678901"}
 
 
 def test_syncer_description_is_kept_but_its_barcode_is_never_used():
@@ -300,6 +323,34 @@ def test_entered_barcode_plan_rejects_a_value_used_by_another_item():
             {"TARGET": target},
             [target, owner],
         )
+
+
+def test_entered_barcode_plan_ignores_non_barcode_cross_references():
+    target = {
+        "item_code": "TARGET",
+        "description": "Target",
+        "barcode": None,
+        "barcode_reference_id": None,
+        "barcode_reference_value": None,
+        "barcode_reference_count": 0,
+        "status": "Active",
+        "alternate_ids": {"012345678905"},
+        "barcode_ids": set(),
+    }
+    supplier_owner = {
+        **target,
+        "item_code": "SUPPLIER-OWNER",
+        "description": "Supplier owner",
+    }
+
+    planned = plan_entered_barcodes(
+        [{"item_code": "TARGET", "barcode": "012345678905"}],
+        {"TARGET": target},
+        [target, supplier_owner],
+    )
+
+    assert planned[0]["action"] == "create"
+    assert planned[0]["barcode"] == "012345678905"
 
 
 def test_stock_item_lookup_calls_myob_with_cross_references(tmp_path):
@@ -530,3 +581,39 @@ def test_main_qty_available_reports_slow_myob_timeout(tmp_path):
     with pytest.raises(MyobError, match="longer than three minutes"):
         client.get_main_qty_available(["NEW1"])
     client._client.close()
+
+
+def test_main_qty_on_hand_uses_the_on_hand_field(tmp_path):
+    def handler(request):
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "Result": [
+                    {
+                        "InventoryID": field("NEW1"),
+                        "Warehouse": field("MAIN"),
+                        "QtyOnHand": field(14),
+                        "QtyAvailable": field(9),
+                    },
+                    {
+                        "InventoryID": field("NEW1"),
+                        "Warehouse": field("INTR"),
+                        "QtyOnHand": field(99),
+                    },
+                ]
+            },
+        )
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    quantities = client.get_main_qty_on_hand(["new1"])
+    client._client.close()
+
+    assert quantities == {"NEW1": 14}

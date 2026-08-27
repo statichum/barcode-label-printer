@@ -55,7 +55,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.7.2",
+    version="1.8.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -67,8 +67,10 @@ barcode_admin_sessions: dict[str, float] = {}
 barcode_large_batch_sessions: dict[str, float] = {}
 barcode_assignment_previews: dict[str, dict] = {}
 barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0}
+barcode_stock_cache: dict = {"quantities": None, "stored_at": None}
 barcode_admin_lock = threading.Lock()
 barcode_catalog_refresh_lock = threading.Lock()
+barcode_stock_refresh_lock = threading.Lock()
 barcode_entry_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
 
@@ -115,6 +117,10 @@ def _barcode_catalog_path() -> Path:
     return settings.data_dir / "barcode-stock-items.json"
 
 
+def _barcode_stock_path() -> Path:
+    return settings.data_dir / "barcode-stock-on-hand.json"
+
+
 def _read_stored_assignment_catalog() -> tuple[list[dict], float] | None:
     path = _barcode_catalog_path()
     try:
@@ -152,6 +158,11 @@ def _set_assignment_catalog(items: list[dict], stored_at: float) -> None:
 def _stored_assignment_item(item: dict) -> dict:
     stored = dict(item)
     stored["alternate_ids"] = sorted(item.get("alternate_ids", []))
+    barcode_ids = item.get("barcode_ids")
+    if barcode_ids is None:
+        selected = item.get("barcode_reference_value") or item.get("barcode")
+        barcode_ids = {selected} if selected else set()
+    stored["barcode_ids"] = sorted(barcode_ids)
     return stored
 
 
@@ -173,7 +184,10 @@ def _public_assignment_catalog(items: list[dict]) -> list[dict]:
     ]
 
 
-def _public_barcode_entry_catalog(items: list[dict]) -> list[dict]:
+def _public_barcode_entry_catalog(
+    items: list[dict], quantities: dict[str, int] | None = None
+) -> list[dict]:
+    quantities = quantities or {}
     public_items = []
     for item in items:
         if item.get("status") != "Active":
@@ -186,6 +200,7 @@ def _public_barcode_entry_catalog(items: list[dict]) -> list[dict]:
                 "item_code": item["item_code"],
                 "description": item["description"],
                 "barcode": item.get("barcode"),
+                "stock_on_hand": quantities.get(item["item_code"].upper()),
                 "barcode_entry_allowed": not duplicate_rows,
                 "warning": (
                     "Multiple Barcode rows must be cleaned up in MYOB"
@@ -197,6 +212,74 @@ def _public_barcode_entry_catalog(items: list[dict]) -> list[dict]:
             }
         )
     return public_items
+
+
+def _read_stored_barcode_stock() -> tuple[dict[str, int], float] | None:
+    path = _barcode_stock_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        stored_at = float(payload["stored_at"])
+        raw_quantities = payload["quantities"]
+        if payload.get("version") != 1 or not isinstance(raw_quantities, dict):
+            raise ValueError("unsupported stock snapshot format")
+        quantities = {
+            str(code).strip().upper(): max(0, int(quantity))
+            for code, quantity in raw_quantities.items()
+            if str(code).strip()
+        }
+        return quantities, stored_at
+    except FileNotFoundError:
+        return None
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        logger.warning("Ignoring unreadable barcode stock snapshot: %s", exc)
+        return None
+
+
+def _write_stored_barcode_stock(
+    quantities: dict[str, int], stored_at: float
+) -> None:
+    path = _barcode_stock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(
+            {"version": 1, "stored_at": stored_at, "quantities": quantities}
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def load_barcode_stock_on_hand(
+    refresh: bool = False,
+) -> tuple[dict[str, int], float | None]:
+    with barcode_stock_refresh_lock:
+        quantities = barcode_stock_cache["quantities"]
+        stored_at = barcode_stock_cache["stored_at"]
+        if not refresh and quantities is not None:
+            return quantities, stored_at
+
+        if not refresh:
+            stored = _read_stored_barcode_stock()
+            if stored is None:
+                return {}, None
+            quantities, stored_at = stored
+            barcode_stock_cache.update(
+                {"quantities": quantities, "stored_at": stored_at}
+            )
+            return quantities, stored_at
+
+        items, _ = load_assignment_catalog()
+        quantities = myob.get_main_qty_on_hand(
+            [item["item_code"] for item in items if item.get("status") == "Active"]
+        )
+        stored_at = time.time()
+        _write_stored_barcode_stock(quantities, stored_at)
+        barcode_stock_cache.update(
+            {"quantities": quantities, "stored_at": stored_at}
+        )
+        logger.info("Stored MAIN stock on hand for %s items", len(quantities))
+        return quantities, stored_at
 
 
 def load_assignment_catalog(refresh: bool = False) -> tuple[list[dict], float]:
@@ -324,10 +407,25 @@ def barcode_admin_items(
 def barcode_entry_items(refresh: bool = False):
     try:
         items, stored_at = load_assignment_catalog(refresh=refresh)
+        quantities, stock_stored_at = load_barcode_stock_on_hand()
     except MyobError as exc:
         logger.warning("MYOB barcode entry catalogue lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"items": _public_barcode_entry_catalog(items), "stored_at": stored_at}
+    return {
+        "items": _public_barcode_entry_catalog(items, quantities),
+        "stored_at": stored_at,
+        "stock_stored_at": stock_stored_at,
+    }
+
+
+@app.post("/api/barcode-entry/stock-on-hand/refresh")
+def refresh_barcode_entry_stock_on_hand():
+    try:
+        quantities, stored_at = load_barcode_stock_on_hand(refresh=True)
+    except MyobError as exc:
+        logger.warning("MYOB barcode stock-on-hand refresh failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"quantities": quantities, "stored_at": stored_at}
 
 
 @app.post("/api/barcode-entry/commit")

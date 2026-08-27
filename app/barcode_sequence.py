@@ -9,7 +9,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .myob import internal_barcode_sequence, plan_barcode_assignments
+from .myob import (
+    _barcode_reference_values,
+    internal_barcode_sequence,
+    plan_barcode_assignments,
+)
 
 
 logger = logging.getLogger("barcode-printer.sequence")
@@ -22,9 +26,9 @@ class BarcodeSequenceError(RuntimeError):
 
 def _highest_sequence(items: list[dict]) -> int:
     sequences = (
-        internal_barcode_sequence(alternate_id)
+        internal_barcode_sequence(barcode)
         for item in items
-        for alternate_id in item.get("alternate_ids", set())
+        for barcode in _barcode_reference_values(item)
     )
     return max((sequence for sequence in sequences if sequence is not None), default=0)
 

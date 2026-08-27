@@ -15,6 +15,7 @@ const state = {
   lastAssignedItems: [],
   barcodeEntryItems: [],
   barcodeEntryStoredAt: null,
+  barcodeEntryStockStoredAt: null,
   barcodeEntrySelected: null,
   barcodeEntryPending: new Map(),
   barcodeEntrySending: false,
@@ -52,6 +53,7 @@ const elements = {
   barcodeEntryLoading: document.querySelector("#barcode-entry-loading"),
   barcodeEntryLoadingTitle: document.querySelector("#barcode-entry-loading-title"),
   refreshBarcodeEntryItems: document.querySelector("#refresh-barcode-entry-items"),
+  refreshBarcodeEntryStock: document.querySelector("#refresh-barcode-entry-stock"),
   clearBarcodeEntryBatch: document.querySelector("#clear-barcode-entry-batch"),
   barcodeEntryQueue: document.querySelector("#barcode-entry-queue"),
   barcodeEntryCount: document.querySelector("#barcode-entry-count"),
@@ -585,7 +587,8 @@ function renderBarcodeEntryItems() {
     row.innerHTML = `
       <div class="entry-action"><span class="secondary-button"></span></div>
       <div><b></b><code></code></div>
-      <div class="assign-current-barcode"><code></code><small></small></div>`;
+      <div class="assign-current-barcode"><code></code><small></small></div>
+      <div class="entry-stock"><b></b></div>`;
     const action = row.querySelector(".entry-action .secondary-button");
     action.textContent = pending
       ? "Edit"
@@ -602,6 +605,13 @@ function renderBarcodeEntryItems() {
     const warning = row.querySelector("small");
     warning.textContent = pending ? "Ready to send" : item.warning || "";
     warning.hidden = !warning.textContent;
+    const stock = row.querySelector(".entry-stock b");
+    stock.textContent = Number.isInteger(item.stock_on_hand)
+      ? item.stock_on_hand.toLocaleString("en-NZ")
+      : "—";
+    stock.title = Number.isInteger(item.stock_on_hand)
+      ? "MAIN warehouse stock on hand"
+      : "Stock on hand has not been refreshed for this item";
     if (selectable) {
       row.classList.add("selectable");
       row.tabIndex = 0;
@@ -629,7 +639,10 @@ function renderBarcodeEntryItems() {
   const storedCopy = state.barcodeEntryStoredAt
     ? ` · refreshed ${new Date(state.barcodeEntryStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
     : "";
-  elements.barcodeEntryMeta.textContent = `${matches.length} matching of ${state.barcodeEntryItems.length} active items${limitCopy}${storedCopy}`;
+  const stockCopy = state.barcodeEntryStockStoredAt
+    ? ` · stock ${new Date(state.barcodeEntryStockStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
+    : " · stock not refreshed";
+  elements.barcodeEntryMeta.textContent = `${matches.length} matching of ${state.barcodeEntryItems.length} active items${limitCopy}${storedCopy}${stockCopy}`;
   renderBarcodeEntryQueue();
   updateBarcodeEntrySummary();
 }
@@ -647,6 +660,7 @@ async function loadBarcodeEntryItems(refresh = false) {
     const response = await api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`);
     state.barcodeEntryItems = response.items;
     state.barcodeEntryStoredAt = response.stored_at;
+    state.barcodeEntryStockStoredAt = response.stock_stored_at;
     renderBarcodeEntryItems();
   } catch (error) {
     showMessage(error.message);
@@ -655,6 +669,40 @@ async function loadBarcodeEntryItems(refresh = false) {
     elements.barcodeEntryLoading.hidden = true;
     elements.refreshBarcodeEntryItems.disabled = false;
     elements.refreshBarcodeEntryItems.textContent = "↻ Refresh from MYOB";
+    updateBarcodeEntrySummary();
+  }
+}
+
+async function refreshBarcodeEntryStock() {
+  if (state.busy) return;
+  state.busy = true;
+  elements.barcodeEntryLoading.hidden = false;
+  elements.barcodeEntryLoadingTitle.textContent = "Refreshing MAIN stock on hand from MYOB…";
+  elements.refreshBarcodeEntryItems.disabled = true;
+  elements.refreshBarcodeEntryStock.disabled = true;
+  elements.refreshBarcodeEntryStock.textContent = "Refreshing stock…";
+  updateBarcodeEntrySummary();
+  try {
+    const response = await api("/api/barcode-entry/stock-on-hand/refresh", {
+      method: "POST",
+    });
+    state.barcodeEntryItems.forEach((item) => {
+      const itemCode = item.item_code.toLocaleUpperCase();
+      item.stock_on_hand = Object.hasOwn(response.quantities, itemCode)
+        ? response.quantities[itemCode]
+        : null;
+    });
+    state.barcodeEntryStockStoredAt = response.stored_at;
+    renderBarcodeEntryItems();
+    showToast("MAIN stock on hand refreshed from MYOB.");
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    elements.barcodeEntryLoading.hidden = true;
+    elements.refreshBarcodeEntryItems.disabled = false;
+    elements.refreshBarcodeEntryStock.disabled = false;
+    elements.refreshBarcodeEntryStock.textContent = "↻ Refresh stock on hand";
     updateBarcodeEntrySummary();
   }
 }
@@ -670,6 +718,7 @@ function showBarcodeEntry() {
 elements.barcodeEntrySearch.addEventListener("input", renderBarcodeEntryItems);
 elements.barcodeEntryMissingOnly.addEventListener("change", renderBarcodeEntryItems);
 elements.refreshBarcodeEntryItems.addEventListener("click", () => loadBarcodeEntryItems(true));
+elements.refreshBarcodeEntryStock.addEventListener("click", refreshBarcodeEntryStock);
 elements.clearBarcodeEntryBatch.addEventListener("click", () => {
   state.barcodeEntryPending.clear();
   renderBarcodeEntryItems();

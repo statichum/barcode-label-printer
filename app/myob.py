@@ -179,6 +179,11 @@ def stock_item_assignment_view(item: dict) -> dict | None:
         for reference in (item.get("CrossReferences") or [])
         if _value(reference, "AlternateType") == "Barcode"
     ]
+    barcode_ids = {
+        str(_value(reference, "AlternateID", "") or "").strip()
+        for reference in barcode_references
+        if str(_value(reference, "AlternateID", "") or "").strip()
+    }
     barcode_reference = barcode_references[0] if barcode_references else None
     return {
         "item_code": catalog_item.item_code,
@@ -193,6 +198,24 @@ def stock_item_assignment_view(item: dict) -> dict | None:
         "barcode_reference_count": len(barcode_references),
         "status": str(_value(item, "ItemStatus", "") or "").strip(),
         "alternate_ids": alternate_ids,
+        "barcode_ids": barcode_ids,
+    }
+
+
+def _barcode_reference_values(item: dict) -> set[str]:
+    """Return values stored in Barcode rows, excluding other cross-reference types."""
+
+    if "barcode_ids" in item:
+        values = item.get("barcode_ids") or set()
+    else:
+        # Compatibility with catalogue snapshots written before barcode_ids
+        # was stored separately from all other alternate IDs.
+        selected = item.get("barcode_reference_value") or item.get("barcode")
+        values = {selected} if selected else set()
+    return {
+        str(value or "").strip()
+        for value in values
+        if str(value or "").strip()
     }
 
 
@@ -204,9 +227,9 @@ def plan_barcode_assignments(
 ) -> list[dict]:
     by_code = {item["item_code"].upper(): item for item in stock_items}
     used_ids = {
-        alternate_id
+        barcode
         for item in stock_items
-        for alternate_id in item.get("alternate_ids", set())
+        for barcode in _barcode_reference_values(item)
     }
     missing = [code for code in item_codes if code.upper() not in by_code]
     if missing:
@@ -263,9 +286,9 @@ def plan_barcode_assignments(
 def validate_barcode_assignments(assignments: list[dict], stock_items: list[dict]) -> None:
     by_code = {item["item_code"].upper(): item for item in stock_items}
     used_ids = {
-        alternate_id
+        barcode
         for item in stock_items
-        for alternate_id in item.get("alternate_ids", set())
+        for barcode in _barcode_reference_values(item)
     }
     proposed = set()
     for assignment in assignments:
@@ -346,8 +369,8 @@ def plan_entered_barcodes(
     used_by_barcode: dict[str, set[str]] = {}
     for item in stock_items:
         item_code = item["item_code"].upper()
-        for alternate_id in item.get("alternate_ids", set()):
-            value = str(alternate_id or "").strip()
+        for barcode_value in _barcode_reference_values(item):
+            value = str(barcode_value or "").strip()
             if value and value.casefold() != "x":
                 used_by_barcode.setdefault(value.casefold(), set()).add(item_code)
 
@@ -380,15 +403,6 @@ def plan_entered_barcodes(
         if other_owners:
             raise BarcodeAssignmentConflict(
                 f"Barcode {barcode} is already used by {', '.join(other_owners)}"
-            )
-        item_alternate_ids = {
-            str(value or "").strip().casefold()
-            for value in item.get("alternate_ids", set())
-            if str(value or "").strip()
-        }
-        if not current_matches and barcode_key in item_alternate_ids:
-            raise BarcodeAssignmentConflict(
-                f"Barcode {barcode} already exists as another cross-reference on {item['item_code']}"
             )
         if barcode_key in proposed:
             raise BarcodeAssignmentConflict(
@@ -545,7 +559,13 @@ class MyobClient:
     def list_active_stock_items(self) -> list[dict]:
         return self.list_stock_items(active_only=True)
 
-    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
+    def _get_main_quantity(
+        self,
+        item_codes: list[str],
+        *,
+        field_name: str,
+        description: str,
+    ) -> dict[str, int]:
         selected = {
             code.strip().upper()
             for code in item_codes
@@ -565,24 +585,38 @@ class MyobClient:
             payload = response.json()
         except httpx.TimeoutException as exc:
             raise MyobError(
-                "MYOB stock availability took longer than three minutes; try again"
+                f"MYOB {description} took longer than three minutes; try again"
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise MyobError("MYOB did not return valid MAIN stock availability") from exc
+            raise MyobError(f"MYOB did not return valid MAIN {description}") from exc
         result = payload.get("Result") if isinstance(payload, dict) else None
         if not isinstance(result, list):
-            raise MyobError("MYOB did not return valid MAIN stock availability")
+            raise MyobError(f"MYOB did not return valid MAIN {description}")
         for row in result:
             code = str(_value(row, "InventoryID", "") or "").strip().upper()
             warehouse = str(_value(row, "Warehouse", "") or "").strip().upper()
             if code not in selected or warehouse != "MAIN":
                 continue
             try:
-                available = Decimal(str(_value(row, "QtyAvailable", 0) or 0))
+                quantity = Decimal(str(_value(row, field_name, 0) or 0))
             except (InvalidOperation, TypeError, ValueError):
                 continue
-            quantities[code] += max(0, int(available))
+            quantities[code] += max(0, int(quantity))
         return quantities
+
+    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
+        return self._get_main_quantity(
+            item_codes,
+            field_name="QtyAvailable",
+            description="stock availability",
+        )
+
+    def get_main_qty_on_hand(self, item_codes: list[str]) -> dict[str, int]:
+        return self._get_main_quantity(
+            item_codes,
+            field_name="QtyOnHand",
+            description="stock-on-hand data",
+        )
 
     def assign_barcode(
         self,
