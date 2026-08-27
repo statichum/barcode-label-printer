@@ -21,6 +21,7 @@ from .models import (
     BarcodeAdminLoginRequest,
     BarcodeAssignmentCommitRequest,
     BarcodeAssignmentPreviewRequest,
+    BarcodeCheckRequest,
     BarcodeEntryCommitRequest,
     ManualItemLookupRequest,
     PrintRequest,
@@ -32,10 +33,12 @@ from .myob import (
     MyobClient,
     MyobError,
     PurchaseOrderNotFound,
+    _barcode_reference_values,
     merge_catalog_items,
     merge_purchase_order,
     plan_entered_barcodes,
     refresh_barcode_assignment_targets,
+    supplier_reference_values,
     validate_barcode_assignments,
 )
 from .printer import PrinterDiscovery, PrinterUnavailable
@@ -55,7 +58,7 @@ printing = PrintService(settings, discovery)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.9.0",
+    version="1.10.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -164,6 +167,7 @@ def _stored_assignment_item(item: dict) -> dict:
         selected = item.get("barcode_reference_value") or item.get("barcode")
         barcode_ids = {selected} if selected else set()
     stored["barcode_ids"] = sorted(barcode_ids)
+    stored["supplier_codes"] = sorted(supplier_reference_values(item))
     return stored
 
 
@@ -429,6 +433,52 @@ def barcode_entry_items(refresh: bool = False):
             if stock_stored_at
             else None
         ),
+    }
+
+
+@app.post("/api/barcodes/check")
+def check_barcode(request: BarcodeCheckRequest):
+    try:
+        items, stored_at = load_assignment_catalog()
+    except MyobError as exc:
+        logger.warning("MYOB barcode check catalogue lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    barcode_key = request.barcode.casefold()
+    matches = [
+        item
+        for item in items
+        if item.get("status") == "Active"
+        and barcode_key != "x"
+        and any(
+            value.casefold() == barcode_key
+            for value in _barcode_reference_values(item)
+        )
+    ]
+    if not matches:
+        return {
+            "found": False,
+            "barcode": request.barcode,
+            "stored_at": stored_at,
+        }
+    if len(matches) > 1:
+        item_codes = sorted(item["item_code"] for item in matches)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Barcode {request.barcode} is linked to multiple MYOB items: "
+                + ", ".join(item_codes)
+            ),
+        )
+
+    item = matches[0]
+    return {
+        "found": True,
+        "barcode": request.barcode,
+        "item_code": item["item_code"],
+        "description": item["description"],
+        "supplier_codes": sorted(supplier_reference_values(item)),
+        "stored_at": stored_at,
     }
 
 

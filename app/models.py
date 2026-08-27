@@ -147,3 +147,15 @@ class BarcodeEntryCommitRequest(BaseModel):
         if len(set(barcodes)) != len(barcodes):
             raise ValueError("Each scanned barcode may appear only once in a batch")
         return values
+
+
+class BarcodeCheckRequest(BaseModel):
+    barcode: str = Field(min_length=4, max_length=40)
+
+    @field_validator("barcode")
+    @classmethod
+    def clean_barcode(cls, value: str) -> str:
+        barcode = value.strip()
+        if not re.fullmatch(r"[0-9A-Za-z._/+%$-]{4,40}", barcode):
+            raise ValueError("Scan a valid barcode")
+        return barcode

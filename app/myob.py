@@ -185,6 +185,12 @@ def stock_item_assignment_view(item: dict) -> dict | None:
         if str(_value(reference, "AlternateID", "") or "").strip()
     }
     barcode_reference = barcode_references[0] if barcode_references else None
+    supplier_codes = {
+        str(_value(reference, "AlternateID", "") or "").strip()
+        for reference in (item.get("CrossReferences") or [])
+        if _value(reference, "AlternateType") == "Vendor Part Number"
+        and str(_value(reference, "AlternateID", "") or "").strip()
+    }
     return {
         "item_code": catalog_item.item_code,
         "description": catalog_item.description,
@@ -199,6 +205,7 @@ def stock_item_assignment_view(item: dict) -> dict | None:
         "status": str(_value(item, "ItemStatus", "") or "").strip(),
         "alternate_ids": alternate_ids,
         "barcode_ids": barcode_ids,
+        "supplier_codes": supplier_codes,
     }
 
 
@@ -212,6 +219,20 @@ def _barcode_reference_values(item: dict) -> set[str]:
         # was stored separately from all other alternate IDs.
         selected = item.get("barcode_reference_value") or item.get("barcode")
         values = {selected} if selected else set()
+    return {
+        str(value or "").strip()
+        for value in values
+        if str(value or "").strip()
+    }
+
+
+def supplier_reference_values(item: dict) -> set[str]:
+    """Return vendor part numbers, with a fallback for older stored catalogues."""
+
+    if "supplier_codes" in item:
+        values = item.get("supplier_codes") or set()
+    else:
+        values = set(item.get("alternate_ids") or set()) - _barcode_reference_values(item)
     return {
         str(value or "").strip()
         for value in values

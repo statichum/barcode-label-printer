@@ -119,6 +119,7 @@ def test_assignment_view_separates_barcodes_from_other_cross_references():
 
     assert item["alternate_ids"] == {"012345678905", "9412345678901"}
     assert item["barcode_ids"] == {"9412345678901"}
+    assert item["supplier_codes"] == {"012345678905"}
 
 
 def test_syncer_description_is_kept_but_its_barcode_is_never_used():

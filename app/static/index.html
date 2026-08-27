@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=27" />
+    <link rel="stylesheet" href="/static/styles.css?v=28" />
   </head>
   <body>
     <header class="topbar">
@@ -53,7 +53,7 @@
     <main class="shell">
       <section class="hero">
         <h1>Manage barcodes.</h1>
-        <p class="intro">Print labels, enter supplier barcodes, or assign new ones.</p>
+        <p class="intro">Print labels, enter or assign barcodes, and check what they identify.</p>
       </section>
 
       <section class="workspace" aria-label="Barcode management">
@@ -69,6 +69,9 @@
           </button>
           <button class="mode-tab" role="tab" aria-selected="false" aria-controls="assign-panel" id="assign-tab" data-mode="assign">
             <span class="tab-number">04</span> Assign barcodes
+          </button>
+          <button class="mode-tab" role="tab" aria-selected="false" aria-controls="check-panel" id="check-tab" data-mode="check">
+            <span class="tab-number">05</span> Check Barcode
           </button>
         </div>
 
@@ -180,6 +183,41 @@
                 </div>
               </div>
               <button id="review-assignments" class="print-button" type="button" disabled>Review assignments</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel check-panel" id="check-panel" role="tabpanel" aria-labelledby="check-tab" hidden>
+          <div class="barcode-check-listener">
+            <span class="status-dot online" aria-hidden="true"></span>
+            <span><b>Scanner ready</b><small>No field selection needed — just scan the product.</small></span>
+          </div>
+          <div id="barcode-check-display" class="barcode-check-display" role="status" aria-live="polite" aria-atomic="true">
+            <div id="barcode-check-idle" class="barcode-check-idle">
+              <span class="barcode-check-glyph" aria-hidden="true"></span>
+              <h2>Scan a barcode.</h2>
+              <p>The matching MYOB item will appear here.</p>
+            </div>
+            <div id="barcode-check-loading" class="barcode-check-loading" hidden>
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <h2>Checking barcode…</h2>
+              <code id="barcode-check-loading-code"></code>
+            </div>
+            <div id="barcode-check-match" class="barcode-check-match" hidden>
+              <p class="eyebrow">BARCODE MATCH</p>
+              <code id="barcode-check-scanned"></code>
+              <h2 id="barcode-check-item-code"></h2>
+              <p id="barcode-check-description"></p>
+              <dl>
+                <div><dt>Supplier code</dt><dd id="barcode-check-supplier-code"></dd></div>
+              </dl>
+            </div>
+            <div id="barcode-check-missing" class="barcode-check-missing" hidden>
+              <span aria-hidden="true">×</span>
+              <p class="eyebrow">NO BARCODE LINKED</p>
+              <h2 id="barcode-check-missing-title">No item found.</h2>
+              <p id="barcode-check-missing-message">No MYOB Barcode row is linked to this scan.</p>
+              <code id="barcode-check-missing-code"></code>
             </div>
           </div>
         </div>
@@ -345,6 +383,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=27" defer></script>
+    <script src="/static/app.js?v=28" defer></script>
   </body>
 </html>

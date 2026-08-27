@@ -134,7 +134,7 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
   box-shadow: var(--shadow);
 }
 
-.mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.mode-tabs { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); }
 .mode-tab {
   position: relative;
   min-height: 68px;
@@ -337,6 +337,31 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
 .stock-label-actions { grid-template-columns: minmax(150px, 1fr) auto auto; }
 .dialog-actions .primary-button { width: auto; }
 
+.check-panel { padding: 30px; }
+.barcode-check-listener { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 11px 16px; border: 1px solid #cdd9d2; background: #e8eee9; }
+.barcode-check-listener b, .barcode-check-listener small { display: block; }
+.barcode-check-listener b { font-size: 13px; }
+.barcode-check-listener small { margin-top: 3px; color: var(--ink-muted); font-size: 11px; }
+.barcode-check-display { min-height: 330px; display: grid; place-items: center; margin-top: 18px; padding: 34px; border: 1px solid var(--line); background: #fafaf7; }
+.barcode-check-idle, .barcode-check-loading, .barcode-check-missing { text-align: center; }
+.barcode-check-idle h2, .barcode-check-loading h2, .barcode-check-missing h2 { margin: 18px 0 0; font: 500 34px Georgia, serif; }
+.barcode-check-idle p, .barcode-check-missing > p:not(.eyebrow) { margin: 9px 0 0; color: var(--ink-muted); font-size: 14px; }
+.barcode-check-glyph { width: 92px; height: 56px; display: inline-block; border: 1px solid #cbd5cf; background: repeating-linear-gradient(90deg, var(--ink) 0 3px, transparent 3px 6px, var(--ink) 6px 8px, transparent 8px 12px); opacity: .76; }
+.barcode-check-loading .loading-spinner { width: 38px; height: 38px; display: inline-block; }
+.barcode-check-loading code { display: block; margin-top: 12px; color: var(--ink-muted); font: 700 13px ui-monospace, monospace; }
+.barcode-check-match { width: min(650px, 100%); }
+.barcode-check-match > code { display: inline-block; padding: 7px 10px; border: 1px solid #cbd5cf; background: #eef1ec; color: #587069; font: 750 12px ui-monospace, monospace; }
+.barcode-check-match h2 { margin: 20px 0 0; color: var(--forest); font-size: clamp(31px, 5vw, 48px); letter-spacing: -.025em; line-height: 1.05; }
+.barcode-check-match > p:not(.eyebrow) { margin: 12px 0 0; font-size: clamp(17px, 2.4vw, 22px); font-weight: 650; line-height: 1.35; }
+.barcode-check-match dl { margin: 28px 0 0; }
+.barcode-check-match dl div { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 18px; padding: 16px 18px; border: 1px solid var(--line); background: var(--surface); }
+.barcode-check-match dt { color: var(--ink-muted); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+.barcode-check-match dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font: 800 17px ui-monospace, monospace; }
+.barcode-check-missing > span { width: 58px; height: 58px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--danger-soft); color: var(--danger); font-size: 38px; line-height: 1; }
+.barcode-check-missing .eyebrow { margin: 17px 0 0; color: var(--danger); }
+.barcode-check-missing code { display: block; margin-top: 10px; color: var(--danger); font: 800 14px ui-monospace, monospace; }
+.barcode-check-idle[hidden], .barcode-check-loading[hidden], .barcode-check-match[hidden], .barcode-check-missing[hidden] { display: none; }
+
 html[data-theme="dark"] body {
   background:
     linear-gradient(rgba(185, 243, 210, .025) 1px, transparent 1px),
@@ -409,6 +434,11 @@ html[data-theme="dark"] .dialog-card { border-color: #4b6259; box-shadow: 0 30px
 html[data-theme="dark"] .assignment-preview-remainder { background: #21342d; color: #99ddc5; }
 html[data-theme="dark"] .write-warning { border-color: #77423d; color: #ffb1a8 !important; }
 html[data-theme="dark"] .stock-label-reauth p { color: #a2e0cb; }
+html[data-theme="dark"] .barcode-check-listener { border-color: #3f574e; background: #20322b; }
+html[data-theme="dark"] .barcode-check-display { background: #141d1a; }
+html[data-theme="dark"] .barcode-check-glyph { border-color: #52675f; }
+html[data-theme="dark"] .barcode-check-match > code { border-color: #40534c; background: #21302b; color: #a4d2c2; }
+html[data-theme="dark"] .barcode-check-match dl div { border-color: #40534c; }
 
 @media (max-width: 780px) {
   .topbar { height: 64px; padding: 0 18px; }
@@ -468,4 +498,7 @@ html[data-theme="dark"] .stock-label-reauth p { color: #a2e0cb; }
   .dialog-card { padding: 28px 22px 22px; }
   .dialog-actions { grid-template-columns: 1fr; }
   .dialog-actions .primary-button, .dialog-actions .secondary-button { width: 100%; }
+  .check-panel { padding: 18px 14px; }
+  .barcode-check-display { min-height: 300px; padding: 26px 18px; }
+  .barcode-check-match dl div { grid-template-columns: 1fr; gap: 7px; }
 }

@@ -25,6 +25,7 @@ const state = {
   barcodeEntryPending: new Map(),
   barcodeEntrySending: false,
   stockLabelRefreshRequested: false,
+  barcodeCheckRequestId: 0,
 };
 
 const elements = {
@@ -109,6 +110,18 @@ const elements = {
   printResultMessage: document.querySelector("#print-result-message"),
   themeToggle: document.querySelector("#theme-toggle"),
   themeColor: document.querySelector("meta[name='theme-color']"),
+  barcodeCheckIdle: document.querySelector("#barcode-check-idle"),
+  barcodeCheckLoading: document.querySelector("#barcode-check-loading"),
+  barcodeCheckLoadingCode: document.querySelector("#barcode-check-loading-code"),
+  barcodeCheckMatch: document.querySelector("#barcode-check-match"),
+  barcodeCheckScanned: document.querySelector("#barcode-check-scanned"),
+  barcodeCheckItemCode: document.querySelector("#barcode-check-item-code"),
+  barcodeCheckDescription: document.querySelector("#barcode-check-description"),
+  barcodeCheckSupplierCode: document.querySelector("#barcode-check-supplier-code"),
+  barcodeCheckMissing: document.querySelector("#barcode-check-missing"),
+  barcodeCheckMissingTitle: document.querySelector("#barcode-check-missing-title"),
+  barcodeCheckMissingMessage: document.querySelector("#barcode-check-missing-message"),
+  barcodeCheckMissingCode: document.querySelector("#barcode-check-missing-code"),
 };
 
 function storedTheme() {
@@ -270,11 +283,82 @@ function switchMode(mode) {
   } else if (mode === "entry") {
     elements.results.hidden = true;
     showBarcodeEntry();
+  } else if (mode === "check") {
+    elements.results.hidden = true;
   } else {
     if (state.items.length) elements.results.hidden = false;
     (mode === "po" ? elements.poNumber : elements.itemCode).focus();
   }
 }
+
+function showBarcodeCheckState(activeState) {
+  elements.barcodeCheckIdle.hidden = activeState !== "idle";
+  elements.barcodeCheckLoading.hidden = activeState !== "loading";
+  elements.barcodeCheckMatch.hidden = activeState !== "match";
+  elements.barcodeCheckMissing.hidden = activeState !== "missing";
+}
+
+async function checkBarcode(rawBarcode) {
+  const barcode = String(rawBarcode || "").trim();
+  if (!barcode) return;
+  const requestId = ++state.barcodeCheckRequestId;
+  clearMessage();
+  elements.barcodeCheckLoadingCode.textContent = barcode;
+  showBarcodeCheckState("loading");
+  try {
+    const response = await api("/api/barcodes/check", {
+      method: "POST",
+      body: JSON.stringify({ barcode }),
+    });
+    if (requestId !== state.barcodeCheckRequestId) return;
+    if (!response.found) {
+      elements.barcodeCheckMissingTitle.textContent = "No item found.";
+      elements.barcodeCheckMissingMessage.textContent = "No MYOB Barcode row is linked to this scan.";
+      elements.barcodeCheckMissingCode.textContent = barcode;
+      showBarcodeCheckState("missing");
+      return;
+    }
+    elements.barcodeCheckScanned.textContent = response.barcode;
+    elements.barcodeCheckItemCode.textContent = response.item_code;
+    elements.barcodeCheckDescription.textContent = response.description;
+    elements.barcodeCheckSupplierCode.textContent = response.supplier_codes.length
+      ? response.supplier_codes.join(" · ")
+      : "Not recorded in MYOB";
+    showBarcodeCheckState("match");
+  } catch (error) {
+    if (requestId !== state.barcodeCheckRequestId) return;
+    elements.barcodeCheckMissingTitle.textContent = "Barcode check failed.";
+    elements.barcodeCheckMissingMessage.textContent = error.message;
+    elements.barcodeCheckMissingCode.textContent = barcode;
+    showBarcodeCheckState("missing");
+  }
+}
+
+let barcodeScanBuffer = "";
+let barcodeScanLastKeyAt = 0;
+document.addEventListener("keydown", (event) => {
+  if (state.mode !== "check" || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+  if (document.querySelector("dialog[open]")) return;
+  const buttonAction = event.target instanceof HTMLButtonElement
+    && !barcodeScanBuffer
+    && (event.key === "Enter" || event.key === " ");
+  if (buttonAction) return;
+  const now = performance.now();
+  if (event.key === "Enter" || event.key === "Tab") {
+    const barcode = barcodeScanBuffer;
+    barcodeScanBuffer = "";
+    barcodeScanLastKeyAt = 0;
+    if (!barcode) return;
+    event.preventDefault();
+    checkBarcode(barcode);
+    return;
+  }
+  if (event.key.length !== 1) return;
+  if (now - barcodeScanLastKeyAt > 180) barcodeScanBuffer = "";
+  barcodeScanBuffer += event.key;
+  barcodeScanLastKeyAt = now;
+  event.preventDefault();
+});
 
 function quantityValue(value) {
   return Math.max(1, Math.min(999, Number.parseInt(value, 10) || 1));
