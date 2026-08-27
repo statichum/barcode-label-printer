@@ -11,12 +11,12 @@
     <title>PRV Label Station</title>
     <meta
       name="description"
-      content="Look up purchase orders and print product barcode labels."
+      content="Manage product barcodes and print barcode labels."
     />
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=22" />
+    <link rel="stylesheet" href="/static/styles.css?v=23" />
   </head>
   <body>
     <header class="topbar">
@@ -35,15 +35,11 @@
 
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">WAREHOUSE TOOL</p>
-        <h1>Print product labels.</h1>
-        <p class="intro">
-          Load a purchase order or add individual item codes. Review quantities,
-          then print the labels you need.
-        </p>
+        <h1>Manage barcodes.</h1>
+        <p class="intro">Print labels, enter supplier barcodes, or assign new ones.</p>
       </section>
 
-      <section class="workspace" aria-label="Label preparation">
+      <section class="workspace" aria-label="Barcode management">
         <div class="mode-tabs" role="tablist" aria-label="Label source">
           <button class="mode-tab active" role="tab" aria-selected="true" aria-controls="po-panel" id="po-tab" data-mode="po">
             <span class="tab-number">01</span> Purchase order

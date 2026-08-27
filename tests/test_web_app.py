@@ -16,6 +16,9 @@ def test_home_page_declares_web_app_icons():
     assert 'id="stock-label-reauth"' in response.text
     assert 'id="entry-tab"' in response.text
     assert 'id="barcode-entry-form"' in response.text
+    assert "Manage barcodes." in response.text
+    assert "Print labels, enter supplier barcodes, or assign new ones." in response.text
+    assert "Print product labels." not in response.text
 
 
 def test_web_app_manifest_and_icons_are_served():
