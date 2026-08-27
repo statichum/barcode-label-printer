@@ -1,3 +1,5 @@
+const themeStorageKey = "prv-label-station-theme";
+
 const state = {
   mode: "po",
   resultMode: null,
@@ -105,7 +107,44 @@ const elements = {
   printResultKicker: document.querySelector("#print-result-kicker"),
   printResultTitle: document.querySelector("#print-result-title"),
   printResultMessage: document.querySelector("#print-result-message"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  themeColor: document.querySelector("meta[name='theme-color']"),
 };
+
+function storedTheme() {
+  try {
+    const theme = localStorage.getItem(themeStorageKey);
+    return theme === "light" || theme === "dark" ? theme : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme, persist = true) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const label = dark ? "Switch to light mode" : "Switch to dark mode";
+  elements.themeToggle.setAttribute("aria-label", label);
+  elements.themeToggle.setAttribute("title", label);
+  elements.themeToggle.setAttribute("aria-pressed", String(dark));
+  elements.themeColor.setAttribute("content", dark ? "#101815" : "#17483e");
+  if (persist) {
+    try {
+      localStorage.setItem(themeStorageKey, dark ? "dark" : "light");
+    } catch {
+      // Theme persistence is optional when browser storage is unavailable.
+    }
+  }
+}
+
+const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+applyTheme(storedTheme() || (systemTheme.matches ? "dark" : "light"), false);
+elements.themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
+systemTheme.addEventListener?.("change", (event) => {
+  if (!storedTheme()) applyTheme(event.matches ? "dark" : "light", false);
+});
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const defaultMaxAssignmentItems = 350;

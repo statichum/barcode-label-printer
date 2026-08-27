@@ -16,7 +16,18 @@
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=26" />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("prv-label-station-theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark"
+          ? savedTheme
+          : prefersDark ? "dark" : "light";
+      } catch {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=27" />
   </head>
   <body>
     <header class="topbar">
@@ -24,12 +35,18 @@
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span><b>PRV</b><small>Label Station</small></span>
       </a>
-      <div class="printer-pill" id="printer-status" role="status" aria-live="polite">
-        <span class="status-dot checking"></span>
-        <span class="printer-status-copy">
-          <b>Checking printer</b>
-          <small>Configured label printer</small>
-        </span>
+      <div class="topbar-actions">
+        <div class="printer-pill" id="printer-status" role="status" aria-live="polite">
+          <span class="status-dot checking"></span>
+          <span class="printer-status-copy">
+            <b>Checking printer</b>
+            <small>Configured label printer</small>
+          </span>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false" title="Switch to dark mode">
+          <span class="theme-moon" aria-hidden="true">☾</span>
+          <span class="theme-sun" aria-hidden="true">☀</span>
+        </button>
       </div>
     </header>
 
@@ -328,6 +345,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=26" defer></script>
+    <script src="/static/app.js?v=27" defer></script>
   </body>
 </html>

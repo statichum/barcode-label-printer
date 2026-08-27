@@ -19,6 +19,19 @@ def test_home_page_declares_web_app_icons():
     assert "Manage barcodes." in response.text
     assert "Print labels, enter supplier barcodes, or assign new ones." in response.text
     assert "Print product labels." not in response.text
+    assert 'id="theme-toggle"' in response.text
+    assert 'localStorage.getItem("prv-label-station-theme")' in response.text
+
+
+def test_web_app_theme_toggle_is_persistent_and_accessible():
+    page = client.get("/").text
+    script = client.get("/static/app.js").text
+
+    assert 'aria-label="Switch to dark mode"' in page
+    assert 'const themeStorageKey = "prv-label-station-theme";' in script
+    assert 'elements.themeToggle.setAttribute("aria-pressed", String(dark));' in script
+    assert "localStorage.setItem(themeStorageKey" in script
+    assert 'window.matchMedia("(prefers-color-scheme: dark)")' in script
 
 
 def test_web_app_manifest_and_icons_are_served():
