@@ -8,12 +8,14 @@ const state = {
   busy: false,
   barcodeAdminToken: "",
   assignmentItems: [],
+  assignmentVisibleLimit: 250,
   assignmentSelected: new Set(),
   assignmentPreview: null,
   assignmentStoredAt: null,
   assignmentLargeBatchUnlocked: false,
   lastAssignedItems: [],
   barcodeEntryItems: [],
+  barcodeEntryVisibleLimit: 250,
   barcodeEntryStoredAt: null,
   barcodeEntryStockStoredAt: null,
   barcodeEntryStockFresh: false,
@@ -107,6 +109,7 @@ const elements = {
 
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const defaultMaxAssignmentItems = 350;
+const catalogueRenderBatchSize = 250;
 const stockCacheSeconds = 12 * 60 * 60;
 const assignedItemRecoveryKey = "prv-label-station:last-assigned-items";
 
@@ -588,9 +591,35 @@ function barcodeEntryStockCacheIsFresh() {
   );
 }
 
+function appendLoadMoreControl(container, total, visibleCount, loadMore) {
+  const remaining = total - visibleCount;
+  if (remaining <= 0) return;
+  const nextCount = Math.min(catalogueRenderBatchSize, remaining);
+  const control = document.createElement("div");
+  control.className = "catalogue-load-more";
+  const button = document.createElement("button");
+  button.className = "secondary-button";
+  button.type = "button";
+  button.textContent = `Load ${nextCount.toLocaleString("en-NZ")} more`;
+  const status = document.createElement("small");
+  status.textContent = `${remaining.toLocaleString("en-NZ")} item${remaining === 1 ? "" : "s"} remaining`;
+  button.addEventListener("click", loadMore);
+  control.append(button, status);
+  container.append(control);
+}
+
+function loadMoreBarcodeEntryItems() {
+  const total = filteredBarcodeEntryItems().length;
+  if (state.barcodeEntryVisibleLimit >= total) return;
+  const scrollTop = elements.barcodeEntryItemList.scrollTop;
+  state.barcodeEntryVisibleLimit += catalogueRenderBatchSize;
+  renderBarcodeEntryItems();
+  elements.barcodeEntryItemList.scrollTop = scrollTop;
+}
+
 function renderBarcodeEntryItems() {
   const matches = filteredBarcodeEntryItems();
-  const visible = matches.slice(0, 250);
+  const visible = matches.slice(0, state.barcodeEntryVisibleLimit);
   const stockCacheFresh = barcodeEntryStockCacheIsFresh();
   elements.barcodeEntryItemList.replaceChildren();
 
@@ -652,7 +681,13 @@ function renderBarcodeEntryItems() {
     empty.textContent = "No active stock items match this search.";
     elements.barcodeEntryItemList.append(empty);
   }
-  const limitCopy = matches.length > visible.length ? ` · showing first ${visible.length}` : "";
+  appendLoadMoreControl(
+    elements.barcodeEntryItemList,
+    matches.length,
+    visible.length,
+    loadMoreBarcodeEntryItems
+  );
+  const limitCopy = matches.length > visible.length ? ` · showing ${visible.length}` : "";
   const storedCopy = state.barcodeEntryStoredAt
     ? ` · refreshed ${new Date(state.barcodeEntryStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
     : "";
@@ -676,11 +711,13 @@ async function loadBarcodeEntryItems(refresh = false) {
   elements.refreshBarcodeEntryItems.textContent = refresh ? "Refreshing…" : "Loading…";
   updateBarcodeEntrySummary();
   try {
+    const hadItems = state.barcodeEntryItems.length > 0;
     const response = await api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`);
     state.barcodeEntryItems = response.items;
     state.barcodeEntryStoredAt = response.stored_at;
     state.barcodeEntryStockStoredAt = response.stock_stored_at;
     state.barcodeEntryStockFresh = response.stock_cache_fresh;
+    if (refresh || !hadItems) state.barcodeEntryVisibleLimit = catalogueRenderBatchSize;
     renderBarcodeEntryItems();
   } catch (error) {
     showMessage(error.message);
@@ -732,8 +769,22 @@ function showBarcodeEntry() {
   loadBarcodeEntryItems(false);
 }
 
-elements.barcodeEntrySearch.addEventListener("input", renderBarcodeEntryItems);
-elements.barcodeEntryMissingOnly.addEventListener("change", renderBarcodeEntryItems);
+elements.barcodeEntrySearch.addEventListener("input", () => {
+  state.barcodeEntryVisibleLimit = catalogueRenderBatchSize;
+  elements.barcodeEntryItemList.scrollTop = 0;
+  renderBarcodeEntryItems();
+});
+elements.barcodeEntryMissingOnly.addEventListener("change", () => {
+  state.barcodeEntryVisibleLimit = catalogueRenderBatchSize;
+  elements.barcodeEntryItemList.scrollTop = 0;
+  renderBarcodeEntryItems();
+});
+elements.barcodeEntryItemList.addEventListener("scroll", () => {
+  const list = elements.barcodeEntryItemList;
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 140) {
+    loadMoreBarcodeEntryItems();
+  }
+});
 elements.refreshBarcodeEntryItems.addEventListener("click", () => loadBarcodeEntryItems(true));
 elements.refreshBarcodeEntryStock.addEventListener("click", refreshBarcodeEntryStock);
 elements.clearBarcodeEntryBatch.addEventListener("click", () => {
@@ -842,12 +893,18 @@ function filteredAssignmentItems() {
     .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
 }
 
+function loadMoreAssignmentItems() {
+  const total = filteredAssignmentItems().length;
+  if (state.assignmentVisibleLimit >= total) return;
+  const scrollTop = elements.assignItemList.scrollTop;
+  state.assignmentVisibleLimit += catalogueRenderBatchSize;
+  renderAssignmentItems();
+  elements.assignItemList.scrollTop = scrollTop;
+}
+
 function renderAssignmentItems() {
-  const query = elements.assignSearch.value.trim().toLocaleLowerCase();
-  const matches = state.assignmentItems
-    .filter((item) => assignmentMatches(item, query))
-    .sort((left, right) => naturalCollator.compare(left.item_code, right.item_code));
-  const visible = matches.slice(0, 250);
+  const matches = filteredAssignmentItems();
+  const visible = matches.slice(0, state.assignmentVisibleLimit);
   elements.assignItemList.replaceChildren();
 
   for (const item of visible) {
@@ -893,7 +950,13 @@ function renderAssignmentItems() {
     empty.textContent = "No active stock items match this search.";
     elements.assignItemList.append(empty);
   }
-  const limitCopy = matches.length > visible.length ? ` · showing first ${visible.length}` : "";
+  appendLoadMoreControl(
+    elements.assignItemList,
+    matches.length,
+    visible.length,
+    loadMoreAssignmentItems
+  );
+  const limitCopy = matches.length > visible.length ? ` · showing ${visible.length}` : "";
   const storedCopy = state.assignmentStoredAt
     ? ` · stored ${new Date(state.assignmentStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}`
     : "";
@@ -916,6 +979,8 @@ async function loadAssignmentItems(refresh = false) {
     const response = await api(`/api/barcode-admin/items${refresh ? "?refresh=true" : ""}`, { barcodeAdmin: true });
     state.assignmentItems = response.items;
     state.assignmentStoredAt = response.stored_at;
+    state.assignmentVisibleLimit = catalogueRenderBatchSize;
+    elements.assignItemList.scrollTop = 0;
     state.assignmentSelected = new Set(
       [...state.assignmentSelected].filter((code) => response.items.some((item) => item.item_code === code && item.assignable))
     );
@@ -985,8 +1050,22 @@ document.querySelector("#assign-pin-form").addEventListener("submit", async (eve
   }
 });
 
-elements.assignSearch.addEventListener("input", renderAssignmentItems);
-elements.assignMissingOnly.addEventListener("change", renderAssignmentItems);
+elements.assignSearch.addEventListener("input", () => {
+  state.assignmentVisibleLimit = catalogueRenderBatchSize;
+  elements.assignItemList.scrollTop = 0;
+  renderAssignmentItems();
+});
+elements.assignMissingOnly.addEventListener("change", () => {
+  state.assignmentVisibleLimit = catalogueRenderBatchSize;
+  elements.assignItemList.scrollTop = 0;
+  renderAssignmentItems();
+});
+elements.assignItemList.addEventListener("scroll", () => {
+  const list = elements.assignItemList;
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 140) {
+    loadMoreAssignmentItems();
+  }
+});
 elements.refreshAssignItems.addEventListener("click", () => loadAssignmentItems(true));
 elements.unlockLargeAssignments.addEventListener("click", () => {
   elements.largeBatchPinError.hidden = true;

@@ -240,6 +240,8 @@ button { color: inherit; }
 .assign-table-head { padding: 10px 0; background: #eef1ec; color: #73847e; font-size: 9px; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; }
 .assign-table-head span { padding: 0 18px; }
 .assign-item-list { max-height: min(55vh, 610px); overflow: auto; background: white; }
+.catalogue-load-more { display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 70px; padding: 12px 18px; background: #f7f7f2; border-bottom: 1px solid var(--line); }
+.catalogue-load-more small { color: var(--ink-muted); font-size: 11px; }
 .assign-item-row { min-height: 74px; border-bottom: 1px solid var(--line); }
 .assign-item-row > div { min-width: 0; display: flex; justify-content: center; flex-direction: column; padding: 13px 18px; }
 .assign-item-row > div + div { border-left: 1px solid #e5e9e4; }

@@ -64,3 +64,6 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert '"?refresh_stock=true"' in script
     assert "terms.every((term) => searchable.includes(term))" in script
     assert 'barcode !== "x"' in script
+    assert "const catalogueRenderBatchSize = 250;" in script
+    assert 'button.textContent = `Load ${nextCount.toLocaleString("en-NZ")} more`;' in script
+    assert script.count('addEventListener("scroll"') >= 2
