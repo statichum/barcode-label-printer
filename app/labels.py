@@ -31,9 +31,9 @@ LARGE_LABEL_MARGIN_DOTS = 48
 LARGE_DESCRIPTION_FONT_WIDTH_DOTS = 46
 LARGE_DESCRIPTION_FONT_HEIGHT_DOTS = 64
 LARGE_DESCRIPTION_LINE_ADVANCE_DOTS = 74
-LARGE_BARCODE_HEIGHT_DOTS = 400
+LARGE_BARCODE_HEIGHT_DOTS = 300
 LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 76
-LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 150
+LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 120
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -248,7 +248,7 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
 
 
 def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
-    """Build a 100 x 175 mm portrait shelf/large-item label for the Zebra."""
+    """Build a landscape composition on 100 x 175 mm Zebra media."""
     if not item.barcode:
         raise ValueError(f"{item.item_code} does not have a barcode")
     barcode = safe_barcode(item.barcode)
@@ -259,7 +259,11 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
     if width != 800 or height != 1400:
         raise ValueError("The large label layout supports 100 x 175 mm at 8 dots/mm")
 
-    available_width = width - (LARGE_LABEL_MARGIN_DOTS * 2)
+    # The physical web is 800 dots wide and advances 1,400 dots per label. All
+    # fields are rotated clockwise so the readable canvas is 1,400 x 800.
+    landscape_width = height
+    landscape_height = width
+    available_width = landscape_width - (LARGE_LABEL_MARGIN_DOTS * 2)
     description_lines = _wrap_proportional_text(
         description,
         available_width=available_width,
@@ -274,8 +278,8 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
     )
 
     barcode_module, barcode_width = _code128_size(barcode, available_width)
-    barcode_x = max(LARGE_LABEL_MARGIN_DOTS, (width - barcode_width) // 2)
-    barcode_y = max(330, description_bottom + 72)
+    barcode_x = max(290, description_bottom + 58)
+    barcode_y = max(LARGE_LABEL_MARGIN_DOTS, (landscape_width - barcode_width) // 2)
 
     item_font_width = min(
         LARGE_ITEM_CODE_MAX_WIDTH_DOTS,
@@ -285,7 +289,12 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
         LARGE_ITEM_CODE_MAX_HEIGHT_DOTS,
         round(LARGE_ITEM_CODE_MAX_HEIGHT_DOTS * item_font_width / LARGE_ITEM_CODE_MAX_WIDTH_DOTS),
     )
-    item_y = min(height - LARGE_LABEL_MARGIN_DOTS - item_font_height, barcode_y + LARGE_BARCODE_HEIGHT_DOTS + 130)
+    item_text_width = _estimated_text_width(item_code, item_font_width)
+    item_x = min(
+        landscape_height - LARGE_LABEL_MARGIN_DOTS - item_font_height,
+        barcode_x + LARGE_BARCODE_HEIGHT_DOTS + 85,
+    )
+    item_y = max(LARGE_LABEL_MARGIN_DOTS, (landscape_width - item_text_width) // 2)
 
     payload = [
         "^XA",
@@ -294,24 +303,25 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
         "^LH0,0",
         f"^PR{settings.printer_print_speed}",
         f"~SD{settings.large_printer_darkness}",
+        "^FWR",
     ]
     for index, line in enumerate(description_lines):
-        y = description_y + (index * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS)
+        x = description_y + (index * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS)
         payload.append(
-            f"^FO{LARGE_LABEL_MARGIN_DOTS},{y}"
-            f"^A0N,{LARGE_DESCRIPTION_FONT_HEIGHT_DOTS},{LARGE_DESCRIPTION_FONT_WIDTH_DOTS}"
+            f"^FO{x},{LARGE_LABEL_MARGIN_DOTS}"
+            f"^A0R,{LARGE_DESCRIPTION_FONT_HEIGHT_DOTS},{LARGE_DESCRIPTION_FONT_WIDTH_DOTS}"
             f"^FD{line}^FS"
         )
     payload.extend(
         [
             f"^BY{barcode_module},2,{LARGE_BARCODE_HEIGHT_DOTS}",
-            f"^FO{barcode_x},{barcode_y}^BCN,{LARGE_BARCODE_HEIGHT_DOTS},N,N,N^FD{barcode}^FS",
-            f"^FO{LARGE_LABEL_MARGIN_DOTS},{item_y}^FB{available_width},1,0,C,0"
-            f"^A0N,{item_font_height},{item_font_width}^FD{item_code}^FS",
+            f"^FO{barcode_x},{barcode_y}^BCR,{LARGE_BARCODE_HEIGHT_DOTS},N,N,N^FD{barcode}^FS",
+            f"^FO{item_x},{item_y}"
+            f"^A0R,{item_font_height},{item_font_width}^FD{item_code}^FS",
             # A second pass offset by two dots gives the distant-reading item
             # code more weight without changing its measured width.
-            f"^FO{LARGE_LABEL_MARGIN_DOTS + 2},{item_y}^FB{available_width},1,0,C,0"
-            f"^A0N,{item_font_height},{item_font_width}^FD{item_code}^FS",
+            f"^FO{item_x + 2},{item_y}"
+            f"^A0R,{item_font_height},{item_font_width}^FD{item_code}^FS",
             f"^PQ{quantity},0,1,N",
             "^XZ",
         ]

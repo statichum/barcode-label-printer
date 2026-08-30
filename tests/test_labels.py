@@ -179,8 +179,9 @@ def test_large_label_uses_100_by_175_mm_zpl_layout(tmp_path):
 
     payload = build_large_label(item, 3, config)
 
-    assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR2~SD20")
-    assert b"^BCN,400,N,N,N^FD9412345678901^FS" in payload
+    assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR2~SD20^FWR")
+    assert b"^BCR,300,N,N,N^FD9412345678901^FS" in payload
+    assert b"^A0R,64,46^FDGT8 Frameset Black Large with a" in payload
     assert payload.count(b"^FDTYSSM11159766^FS") == 2
     assert b"^PQ3,0,1,N^XZ" in payload
 
