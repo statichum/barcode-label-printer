@@ -3,7 +3,14 @@ from unittest.mock import MagicMock
 from app.database import CatalogItem
 import pytest
 
-from app.labels import ESC, PrintService, build_label, safe_barcode, safe_sbpl_text
+from app.labels import (
+    ESC,
+    PrintService,
+    build_label,
+    build_large_label,
+    safe_barcode,
+    safe_sbpl_text,
+)
 from app.printer import PrinterDelivery, PrinterDiscovery
 from tests.helpers import settings
 
@@ -160,3 +167,36 @@ def test_staff_label_uses_name_and_badge_code(tmp_path):
     assert result["reference"] == "Chris Tuckey"
     assert b"PRV PICK & PACK STAFF - Chris Tuckey" in payload
     assert ESC + b"BG02126>FPPU-7K4M-92QX" in payload
+
+
+def test_large_label_uses_100_by_175_mm_zpl_layout(tmp_path):
+    config = settings(tmp_path).large_label_settings()
+    item = CatalogItem(
+        "TYSSM11159766",
+        "GT8 Frameset Black Large with a deliberately long product description",
+        "9412345678901",
+    )
+
+    payload = build_large_label(item, 3, config)
+
+    assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR2~SD20")
+    assert b"^BCN,400,N,N,N^FD9412345678901^FS" in payload
+    assert payload.count(b"^FDTYSSM11159766^FS") == 2
+    assert b"^PQ3,0,1,N^XZ" in payload
+
+
+def test_large_label_dry_run_uses_separate_zpl_spool(tmp_path):
+    config = settings(tmp_path).large_label_settings()
+    discovery = PrinterDiscovery(config, cache_filename="large-printer.json")
+    item = CatalogItem("ITEM-1", "Example item", "1234567890123")
+
+    result = PrintService(
+        config,
+        discovery,
+        label_builder=build_large_label,
+        spool_extension="zpl",
+    ).print_items([(item, 1)], source="manual", reference=None)
+
+    assert result["status"] == "dry-run"
+    assert result["printer"]["model"] == "ZD421"
+    assert (config.spool_dir / f"{result['job_id']}.zpl").is_file()

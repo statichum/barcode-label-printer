@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .barcode_sequence import BarcodeSequenceError, reserve_barcode_assignments
 from .config import Settings
 from .database import CatalogRepository
-from .labels import PrintService
+from .labels import PrintService, build_large_label
 from .models import (
     BarcodeAdminLoginRequest,
     BarcodeAssignmentCommitRequest,
@@ -55,10 +55,20 @@ catalog = CatalogRepository(settings)
 myob = MyobClient(settings)
 discovery = PrinterDiscovery(settings)
 printing = PrintService(settings, discovery)
+large_printer_settings = settings.large_label_settings()
+large_discovery = PrinterDiscovery(
+    large_printer_settings, cache_filename="large-printer.json"
+)
+large_printing = PrintService(
+    large_printer_settings,
+    large_discovery,
+    label_builder=build_large_label,
+    spool_extension="zpl",
+)
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.12.0",
+    version="1.13.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -76,7 +86,7 @@ barcode_catalog_refresh_lock = threading.Lock()
 barcode_stock_refresh_lock = threading.Lock()
 barcode_entry_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
-BARCODE_STOCK_CACHE_SECONDS = 12 * 60 * 60
+BARCODE_STOCK_CACHE_SECONDS = 24 * 60 * 60
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -377,12 +387,22 @@ def favicon():
     return FileResponse(static_dir / "icon-192.png", media_type="image/png")
 
 
+@app.get("/service-worker.js", include_in_schema=False)
+def service_worker():
+    return FileResponse(
+        static_dir / "service-worker.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/api/health")
 def health():
     return {
         "status": "ok",
         "service": "PRV Barcode Printer",
         "print_enabled": settings.print_enabled,
+        "large_print_enabled": settings.large_print_enabled,
         "barcode_assignment_enabled": settings.barcode_assignment_enabled,
         "missing_configuration": settings.validate_runtime(),
     }
@@ -494,6 +514,19 @@ def refresh_barcode_entry_stock_on_hand():
         "stored_at": stored_at,
         "stock_cache_fresh": True,
         "expires_at": stored_at + BARCODE_STOCK_CACHE_SECONDS,
+    }
+
+
+@app.get("/api/stock-on-hand/status")
+def stock_on_hand_status():
+    quantities, stored_at, fresh = load_barcode_stock_on_hand()
+    return {
+        "available": bool(quantities) and fresh,
+        "stored_at": stored_at,
+        "stock_cache_fresh": fresh,
+        "expires_at": (
+            stored_at + BARCODE_STOCK_CACHE_SECONDS if stored_at else None
+        ),
     }
 
 
@@ -780,7 +813,11 @@ def barcode_assignment_stock_labels(
 
 
 @app.get("/api/printer/status")
-def printer_status():
+def printer_status(target: str = "standard"):
+    if target == "large":
+        return large_discovery.status()
+    if target != "standard":
+        raise HTTPException(status_code=422, detail="Unknown printer target")
     return discovery.status()
 
 
@@ -820,6 +857,7 @@ def manual_item_lookup(request: ManualItemLookupRequest):
             status_code=503,
             detail="The syncer database is currently unavailable",
         ) from exc
+    quantities, stock_stored_at, stock_cache_fresh = load_barcode_stock_on_hand()
     return {
         "items": [
             {
@@ -827,6 +865,7 @@ def manual_item_lookup(request: ManualItemLookupRequest):
                 "description": found[code].description if code in found else code,
                 "barcode": found[code].barcode if code in found else None,
                 "quantity": 1,
+                "qty_on_hand": quantities.get(code.upper()) if stock_cache_fresh else None,
                 "selected": bool(code in found and found[code].barcode),
                 "printable": bool(code in found and found[code].barcode),
                 "warning": None
@@ -834,7 +873,14 @@ def manual_item_lookup(request: ManualItemLookupRequest):
                 else "Item or barcode cross-reference not found in MYOB",
             }
             for code in request.item_codes
-        ]
+        ],
+        "stock_stored_at": stock_stored_at,
+        "stock_cache_fresh": stock_cache_fresh,
+        "stock_expires_at": (
+            stock_stored_at + BARCODE_STOCK_CACHE_SECONDS
+            if stock_stored_at
+            else None
+        ),
     }
 
 
@@ -863,7 +909,8 @@ def print_labels(request: PrintRequest):
         )
 
     try:
-        result = printing.print_items(
+        print_service = large_printing if request.label_size == "large" else printing
+        result = print_service.print_items(
             [(found[item.item_code], item.quantity) for item in request.items],
             source=request.source,
             reference=request.reference,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -54,6 +54,18 @@ class Settings:
     label_width_mm: int
     label_height_mm: int
     printer_dots_per_mm: int
+    large_printer_name: str
+    large_printer_model: str
+    large_printer_language: str
+    large_printer_mac: str
+    large_printer_port: int
+    large_printer_ip_override: str | None
+    large_printer_print_speed: int
+    large_printer_darkness: int
+    large_print_enabled: bool
+    large_label_width_mm: int
+    large_label_height_mm: int
+    large_printer_dots_per_mm: int
     data_dir: Path
     spool_dir: Path
 
@@ -95,6 +107,18 @@ class Settings:
             label_width_mm=_int("LABEL_WIDTH_MM", 50),
             label_height_mm=_int("LABEL_HEIGHT_MM", 30),
             printer_dots_per_mm=_int("PRINTER_DOTS_PER_MM", 12),
+            large_printer_name=os.getenv("LARGE_PRINTER_NAME", "zebra-large-label"),
+            large_printer_model=os.getenv("LARGE_PRINTER_MODEL", "ZD421"),
+            large_printer_language=os.getenv("LARGE_PRINTER_LANGUAGE", "ZPL"),
+            large_printer_mac=os.getenv("LARGE_PRINTER_MAC", "60:95:32:06:E0:CF"),
+            large_printer_port=_int("LARGE_PRINTER_PORT", 9100),
+            large_printer_ip_override=os.getenv("LARGE_PRINTER_IP_OVERRIDE") or None,
+            large_printer_print_speed=_int("LARGE_PRINTER_PRINT_SPEED", 2),
+            large_printer_darkness=_int("LARGE_PRINTER_DARKNESS", 20),
+            large_print_enabled=_bool("LARGE_PRINT_ENABLED", False),
+            large_label_width_mm=_int("LARGE_LABEL_WIDTH_MM", 100),
+            large_label_height_mm=_int("LARGE_LABEL_HEIGHT_MM", 175),
+            large_printer_dots_per_mm=_int("LARGE_PRINTER_DOTS_PER_MM", 8),
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
             spool_dir=Path(os.getenv("SPOOL_DIR", "/app/spool")),
         )
@@ -106,6 +130,23 @@ class Settings:
     @property
     def label_height_dots(self) -> int:
         return self.label_height_mm * self.printer_dots_per_mm
+
+    def large_label_settings(self) -> "Settings":
+        """Return the same application settings aimed at the large-label Zebra."""
+        return replace(
+            self,
+            printer_name=self.large_printer_name,
+            printer_model=self.large_printer_model,
+            printer_language=self.large_printer_language,
+            printer_mac=self.large_printer_mac,
+            printer_port=self.large_printer_port,
+            printer_ip_override=self.large_printer_ip_override,
+            printer_print_speed=self.large_printer_print_speed,
+            print_enabled=self.large_print_enabled,
+            label_width_mm=self.large_label_width_mm,
+            label_height_mm=self.large_label_height_mm,
+            printer_dots_per_mm=self.large_printer_dots_per_mm,
+        )
 
     def validate_runtime(self) -> list[str]:
         missing = []
@@ -128,6 +169,16 @@ class Settings:
             missing.append("PRINTER_SEND_TIMEOUT_SECONDS (use 1 through 3600)")
         if self.printer_retry_delay_ms < 0:
             missing.append("PRINTER_RETRY_DELAY_MS (use zero or greater)")
+        if not self.large_printer_mac:
+            missing.append("LARGE_PRINTER_MAC")
+        if not 1 <= self.large_printer_print_speed <= 14:
+            missing.append("LARGE_PRINTER_PRINT_SPEED (use 1 through 14)")
+        if not 0 <= self.large_printer_darkness <= 30:
+            missing.append("LARGE_PRINTER_DARKNESS (use 0 through 30)")
+        if self.large_label_width_mm != 100 or self.large_label_height_mm != 175:
+            missing.append("LARGE_LABEL dimensions (use 100 x 175 mm)")
+        if self.large_printer_dots_per_mm not in {8, 12}:
+            missing.append("LARGE_PRINTER_DOTS_PER_MM (use 8 or 12)")
         if self.barcode_admin_pin and (
             not self.barcode_admin_pin.isdigit()
             or not 4 <= len(self.barcode_admin_pin) <= 12

@@ -57,10 +57,11 @@ def parse_arp_scan(output: str, target_mac: str) -> str | None:
 @dataclass
 class PrinterDiscovery:
     settings: Settings
+    cache_filename: str = "printer.json"
 
     def __post_init__(self):
         self._lock = threading.Lock()
-        self._cache_path = self.settings.data_dir / "printer.json"
+        self._cache_path = self.settings.data_dir / self.cache_filename
 
     def _reachable(self, ip: str) -> bool:
         try:

@@ -63,6 +63,10 @@ def test_web_app_manifest_and_icons_are_served():
     assert favicon.status_code == 200
     assert favicon.headers["content-type"] == "image/png"
 
+    service_worker = client.get("/service-worker.js")
+    assert service_worker.status_code == 200
+    assert "prv-label-station-v31" in service_worker.text
+
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
     page = client.get("/").text
@@ -78,6 +82,22 @@ def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
     assert 'id="print-progress-dialog"' in page
     assert "Large batches can take several minutes to transmit" in script
     assert 'elements.printProgressDialog.addEventListener("cancel"' in script
+    assert 'id="large-print-button"' in page
+    assert 'id="large-print-confirm-dialog"' in page
+    assert 'api("/api/printer/status?target=large")' in script
+    assert 'label_size: labelSize' in script
+
+
+def test_manual_print_can_use_shared_stock_snapshot():
+    page = client.get("/").text
+    script = client.get("/static/app.js").text
+
+    assert 'id="manual-use-stock"' in page
+    assert "Use MAIN stock on hand as quantity" in page
+    assert 'id="refresh-manual-stock"' in page
+    assert 'api("/api/stock-on-hand/status")' in script
+    assert "const stockCacheSeconds = 24 * 60 * 60;" in script
+    assert "Number(item.qty_on_hand)" in script
 
 
 def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints():

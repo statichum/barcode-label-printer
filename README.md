@@ -14,15 +14,17 @@ The operator can:
 - enter existing manufacturer barcodes directly against active MYOB stock items; and
 - print the item description, item code, and scannable Code 128 barcode.
 
-The **Enter barcodes** tab shares the stored active-stock catalogue and manual MYOB refresh used by **Assign barcodes**, but does not require the administration PIN. Search or filter the list, tap an item, scan its existing manufacturer barcode, and add it to a batch before choosing **Send to MYOB**. Missing rows are created, `x` placeholders are treated as missing, and an existing single Barcode row can be deliberately replaced; products with multiple Barcode rows remain blocked for manual cleanup. Duplicate checks compare only MYOB cross-references whose `AlternateType` is `Barcode`, so the same value in a supplier, customer, or other cross-reference does not block entry. Each batch re-reads its selected items immediately before writing and reads them back afterward to verify MYOB stored the expected values. While that write and verification is running, a non-dismissible progress dialog freezes the rest of the UI and warns against closing the page. A partial failure leaves the browser batch intact so it can be refreshed and safely retried. Searches on both catalogue tabs split the query into words and require every word to match somewhere in the item code, description, or barcode, regardless of word order. The Enter barcodes list can also be limited to products with positive MAIN QtyOnHand whenever the shared 12-hour stock snapshot is valid. Both catalogue lists render 250 items initially, automatically add another 250 near the scroll boundary, and retain a **Load more** button as a manual fallback until every matching item is visible.
+The **Enter barcodes** tab shares the stored active-stock catalogue and manual MYOB refresh used by **Assign barcodes**, but does not require the administration PIN. Search or filter the list, tap an item, scan its existing manufacturer barcode, and add it to a batch before choosing **Send to MYOB**. Missing rows are created, `x` placeholders are treated as missing, and an existing single Barcode row can be deliberately replaced; products with multiple Barcode rows remain blocked for manual cleanup. Duplicate checks compare only MYOB cross-references whose `AlternateType` is `Barcode`, so the same value in a supplier, customer, or other cross-reference does not block entry. Each batch re-reads its selected items immediately before writing and reads them back afterward to verify MYOB stored the expected values. While that write and verification is running, a non-dismissible progress dialog freezes the rest of the UI and warns against closing the page. A partial failure leaves the browser batch intact so it can be refreshed and safely retried. Searches on both catalogue tabs split the query into words and require every word to match somewhere in the item code, description, or barcode, regardless of word order. The Enter barcodes list can also be limited to products with positive MAIN QtyOnHand whenever the shared 24-hour stock snapshot is valid. Both catalogue lists render 250 items initially, automatically add another 250 near the scroll boundary, and retain a **Load more** button as a manual fallback until every matching item is visible.
 
 The **Check Barcode** tab listens for scanner input without requiring a field to be selected. Each scan replaces the previous result with the active MYOB item code, description, and vendor part number linked to that Barcode cross-reference. Supplier or customer cross-reference values are not treated as barcodes. An unlinked scan shows a clear warning and immediately leaves the page ready for the next product.
 
-The **Enter barcodes** list also has a narrow **On hand** column for the `MAIN` warehouse. Stock on hand is a shared, stored snapshot in `data/barcode-stock-on-hand.json`: opening the tab or refreshing the product catalogue never triggers the slow stock request. The snapshot is valid for 12 hours and survives container restarts. Once it expires, stock values are hidden until an operator explicitly chooses **Refresh stock on hand** or refreshes stock from the post-assignment label dialog.
+The **Enter barcodes** list also has a narrow **On hand** column for the `MAIN` warehouse. Stock on hand is a shared, stored snapshot in `data/barcode-stock-on-hand.json`: opening the tab or refreshing the product catalogue never triggers the slow stock request. The snapshot is valid for 24 hours and survives container restarts. Once it expires, stock values are hidden until an operator explicitly chooses **Refresh stock on hand**, refreshes it from **Manual Print**, or refreshes stock from the post-assignment label dialog. Manual Print can use the stored `MAIN` quantity directly as the requested label quantity.
 
 The **Assign barcodes** tab is protected by a server-configured PIN. It loads active MYOB stock items for local code/description searching, shows each current Barcode cross-reference, previews generated internal EAN-13 values, rechecks the stored active-item snapshot for collisions, and then updates MYOB. The snapshot is stored in `data/barcode-stock-items.json`, survives container restarts, and changes only after a manual refresh or successful assignment. Concurrent refresh requests share one MYOB catalogue load. Review uses this local snapshot rather than downloading the catalogue again. Barcode numbers are allocated separately by a persistent, atomically locked high-water counter in `data/barcode-sequence.json`. Immediately before writing, confirmation reads only the selected items from MYOB so current Barcode row IDs are used; those items are read back again after writing for verification. An existing Barcode detail row—including an `x` placeholder—is deleted by its MYOB detail `id` and replaced in the same PUT; a new row is appended only when no Barcode row exists.
 
-After a successful assignment, the operator can prepare labels for those items using the same stored `QtyOnHand` snapshot for the `MAIN` warehouse. A fresh snapshot opens the normal label review immediately without contacting MYOB. If it is missing or more than 12 hours old, the app requires the operator to use **Refresh stock first**; stock can also be refreshed on demand even while the cache is still valid.
+After a successful assignment, the operator can prepare labels for those items using the same stored `QtyOnHand` snapshot for the `MAIN` warehouse. A fresh snapshot opens the normal label review immediately without contacting MYOB. If it is missing or more than 24 hours old, the app requires the operator to use **Refresh stock first**; stock can also be refreshed on demand even while the cache is still valid.
+
+Every printable label list has two destinations. **Print labels** uses the normal 50 × 30 mm SATO. **Print large labels** uses the Zebra ZD421 and its permanent 100 × 175 mm stock. The large path checks the Zebra only when requested and always shows a size, quantity, printer-status, and cost warning before its separate confirmation button becomes available. Zebra discovery uses its own MAC/IP cache, so it cannot replace the SATO's remembered address.
 
 Successful assignment commits renew the barcode-administration session, including after a long large-batch write. The assigned item codes are also retained in browser session storage until stock labels are prepared or the operator chooses **Done**. If authentication still expires, the completion dialog accepts the PIN again and automatically resumes the MAIN stock lookup without losing that batch.
 
@@ -60,9 +62,31 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Open `http://10.10.1.14:4050` from the warehouse network.
+For local diagnostics, the app remains available at `http://10.10.1.14:4050`. Staff tablets should use `https://labelstation.prv.co.nz` once the shared Caddy configuration below is deployed.
 
 The container uses host networking because ARP discovery cannot cross a normal Docker bridge. It receives `NET_RAW`, not full privileged access. With host networking, the existing syncer PostgreSQL port is reached at `127.0.0.1:5432`.
+
+## LAN HTTPS and PWA installation
+
+The app includes a manifest, tablet icons and service worker. The service worker activates only in a secure browser context, so staff should install the app from `https://labelstation.prv.co.nz`, not the raw port 4050 address.
+
+Only one Caddy container can bind the server's `10.10.1.14:443`. The existing PRV Pick & Pack Caddy is therefore the shared HTTPS gateway for both apps; do not start a second Caddy stack here. Its Caddyfile contains a second site block that sends `labelstation.prv.co.nz` to host port 4050.
+
+Cloudflare needs a DNS-only (grey-cloud) `A` record for `labelstation.prv.co.nz` pointing to the server's reserved LAN address. The existing restricted Caddy token also needs `Zone / Zone / Read` and `Zone / DNS / Edit` for `prv.co.nz`; no new token, tunnel, proxy, or public router forwarding is required.
+
+After updating this app, reload the shared gateway from the Pick & Pack directory:
+
+```bash
+cd /docker/PRV-PickPack
+git pull --ff-only
+docker compose up -d --build caddy
+docker compose logs --tail=100 caddy
+
+getent ahostsv4 labelstation.prv.co.nz
+curl -fsS https://labelstation.prv.co.nz/api/health
+```
+
+The DNS command should show `10.10.1.14`, and the HTTPS health check must work without `-k`. On Android, open the HTTPS address in Chrome and choose **Install app**. On iPad, open it in Safari and choose **Share → Add to Home Screen**.
 
 ## Required `.env` values
 
@@ -89,6 +113,18 @@ LABEL_WIDTH_MM=50
 LABEL_HEIGHT_MM=30
 PRINTER_DOTS_PER_MM=12
 PRINT_ENABLED=false
+
+LARGE_PRINTER_NAME=zebra-large-label
+LARGE_PRINTER_MODEL=ZD421
+LARGE_PRINTER_LANGUAGE=ZPL
+LARGE_PRINTER_MAC=60:95:32:06:E0:CF
+LARGE_PRINTER_PORT=9100
+LARGE_PRINTER_PRINT_SPEED=2
+LARGE_PRINTER_DARKNESS=20
+LARGE_LABEL_WIDTH_MM=100
+LARGE_LABEL_HEIGHT_MM=175
+LARGE_PRINTER_DOTS_PER_MM=8
+LARGE_PRINT_ENABLED=false
 
 BARCODE_ADMIN_PIN=choose-a-4-to-12-digit-pin
 BARCODE_ADMIN_SESSION_MINUTES=30
@@ -137,6 +173,8 @@ docker compose logs -f
 ```
 
 6. Print one label, check orientation, margins, gap sensing, barcode scanning, and text fit before printing a full PO.
+
+For the first large-label test, leave `LARGE_PRINT_ENABLED=false`, create one large test job, and inspect the `.zpl` file plus its `.json` audit record. Then set `LARGE_PRINT_ENABLED=true`, restart, and print exactly one 100 × 175 mm label. Check orientation, top-of-form calibration, description wrapping, barcode scanning and item-code reading distance before increasing the quantity.
 
 ## Local build
 

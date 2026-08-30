@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,6 +50,7 @@ class PrintRequest(BaseModel):
     items: list[PrintItemRequest] = Field(min_length=1, max_length=350)
     source: str = Field(default="manual", max_length=20)
     reference: str | None = Field(default=None, max_length=80)
+    label_size: Literal["standard", "large"] = "standard"
 
     @field_validator("items")
     @classmethod

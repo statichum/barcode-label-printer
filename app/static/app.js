@@ -7,6 +7,9 @@ const state = {
   reference: null,
   sortMode: "natural",
   printEnabled: false,
+  largePrintEnabled: false,
+  manualStockFresh: false,
+  manualStockStoredAt: null,
   busy: false,
   barcodeAdminToken: "",
   assignmentItems: [],
@@ -37,6 +40,10 @@ const elements = {
   poNumber: document.querySelector("#po-number"),
   itemCode: document.querySelector("#item-code"),
   manualQuantity: document.querySelector("#manual-quantity"),
+  manualUseStock: document.querySelector("#manual-use-stock"),
+  manualStockLabel: document.querySelector("#manual-stock-label"),
+  manualStockStatus: document.querySelector("#manual-stock-status"),
+  refreshManualStock: document.querySelector("#refresh-manual-stock"),
   workspace: document.querySelector(".workspace"),
   message: document.querySelector("#message"),
   results: document.querySelector("#results"),
@@ -51,6 +58,11 @@ const elements = {
   itemCount: document.querySelector("#item-count"),
   printButton: document.querySelector("#print-button"),
   printButtonLabel: document.querySelector("#print-button-label"),
+  largePrintButton: document.querySelector("#large-print-button"),
+  largePrintConfirmDialog: document.querySelector("#large-print-confirm-dialog"),
+  largePrintConfirmSummary: document.querySelector("#large-print-confirm-summary"),
+  largePrinterCheck: document.querySelector("#large-printer-check"),
+  largePrintConfirm: document.querySelector("#large-print-confirm"),
   printerStatus: document.querySelector("#printer-status"),
   toast: document.querySelector("#toast"),
   sortControl: document.querySelector("#sort-control"),
@@ -169,7 +181,7 @@ systemTheme.addEventListener?.("change", (event) => {
 const naturalCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const defaultMaxAssignmentItems = 350;
 const catalogueRenderBatchSize = 250;
-const stockCacheSeconds = 12 * 60 * 60;
+const stockCacheSeconds = 24 * 60 * 60;
 const assignedItemRecoveryKey = "prv-label-station:last-assigned-items";
 
 function rememberAssignedItems(items) {
@@ -295,6 +307,7 @@ function switchMode(mode) {
     elements.results.hidden = true;
   } else {
     if (state.items.length) elements.results.hidden = false;
+    if (mode === "manual") checkManualStockStatus();
     (mode === "po" ? elements.poNumber : elements.itemCode).focus();
   }
 }
@@ -458,6 +471,7 @@ function updateSummary() {
   elements.labelCount.textContent = String(labels);
   elements.itemCount.textContent = `${selected.length} item${selected.length === 1 ? "" : "s"} selected`;
   elements.printButton.disabled = state.busy || labels === 0;
+  elements.largePrintButton.disabled = state.busy || labels === 0;
   elements.printButtonLabel.textContent = state.printEnabled ? "Print labels" : "Create test job";
 }
 
@@ -525,18 +539,93 @@ elements.poForm.addEventListener("submit", async (event) => {
   }
 });
 
+function syncManualStockControls() {
+  const fresh = Boolean(
+    state.manualStockFresh
+    && state.manualStockStoredAt
+    && Date.now() / 1000 - state.manualStockStoredAt < stockCacheSeconds
+  );
+  state.manualStockFresh = fresh;
+  elements.manualUseStock.disabled = !fresh;
+  elements.manualStockLabel.classList.toggle("unavailable", !fresh);
+  elements.manualStockLabel.title = fresh
+    ? "Use the stored MAIN QtyOnHand as the label quantity"
+    : "Refresh stock on hand to use this quantity";
+  if (!fresh) elements.manualUseStock.checked = false;
+  elements.manualStockStatus.textContent = fresh
+    ? `Stored stock from ${new Date(state.manualStockStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}; valid for 24 hours.`
+    : state.manualStockStoredAt
+    ? "The stored stock snapshot has expired. Refresh it to use stock quantities."
+    : "Stock has not been refreshed yet.";
+}
+
+async function checkManualStockStatus() {
+  try {
+    const response = await api("/api/stock-on-hand/status");
+    state.manualStockStoredAt = response.stored_at;
+    state.manualStockFresh = response.stock_cache_fresh;
+    syncManualStockControls();
+  } catch {
+    state.manualStockFresh = false;
+    syncManualStockControls();
+  }
+}
+
+async function refreshManualStock() {
+  if (state.busy) return;
+  clearMessage();
+  state.busy = true;
+  elements.refreshManualStock.disabled = true;
+  elements.refreshManualStock.textContent = "Refreshing MAIN stock…";
+  elements.manualStockStatus.textContent = "Loading stock from MYOB. This can take a few minutes…";
+  try {
+    const response = await api("/api/barcode-entry/stock-on-hand/refresh", { method: "POST" });
+    state.manualStockStoredAt = response.stored_at;
+    state.manualStockFresh = true;
+    state.barcodeEntryStockStoredAt = response.stored_at;
+    state.barcodeEntryStockFresh = true;
+    elements.manualUseStock.checked = true;
+    syncManualStockControls();
+    showToast("MAIN stock on hand refreshed from MYOB.");
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    state.busy = false;
+    elements.refreshManualStock.disabled = false;
+    elements.refreshManualStock.textContent = "↻ Update stock from MYOB";
+    syncManualStockControls();
+    updateSummary();
+  }
+}
+
+elements.refreshManualStock.addEventListener("click", refreshManualStock);
+
 elements.manualForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearMessage();
   setBusy(true);
   const code = elements.itemCode.value.trim();
-  const requestedQuantity = quantityValue(elements.manualQuantity.value);
   try {
     const response = await api("/api/items/lookup", {
       method: "POST",
       body: JSON.stringify({ item_codes: [code] }),
     });
     const item = response.items[0];
+    state.manualStockStoredAt = response.stock_stored_at;
+    state.manualStockFresh = response.stock_cache_fresh;
+    syncManualStockControls();
+    let requestedQuantity = quantityValue(elements.manualQuantity.value);
+    if (elements.manualUseStock.checked) {
+      const stockQuantity = Math.max(0, Number(item.qty_on_hand) || 0);
+      requestedQuantity = Math.min(999, stockQuantity);
+      if (!requestedQuantity) {
+        showMessage(`${item.item_code} has no stored stock on hand in MAIN.`, "info");
+        return;
+      }
+      if (stockQuantity > 999) {
+        item.warning = `MAIN QtyOnHand is ${stockQuantity.toLocaleString("en-NZ")}; label quantity is limited to 999`;
+      }
+    }
     if (state.resultMode !== "manual") {
       state.items = [];
       state.resultMode = "manual";
@@ -546,9 +635,9 @@ elements.manualForm.addEventListener("submit", async (event) => {
       ? state.items.findIndex((entry) => entry.item_code === item.item_code)
       : -1;
     if (existingIndex >= 0) {
-      state.items[existingIndex].quantity = quantityValue(
-        state.items[existingIndex].quantity + requestedQuantity
-      );
+      state.items[existingIndex].quantity = elements.manualUseStock.checked
+        ? requestedQuantity
+        : quantityValue(state.items[existingIndex].quantity + requestedQuantity);
       state.items[existingIndex].selected = state.items[existingIndex].printable;
     } else {
       item.quantity = requestedQuantity;
@@ -559,7 +648,7 @@ elements.manualForm.addEventListener("submit", async (event) => {
     renderResults({
       kicker: "MANUAL LABELS",
       title: "Label list",
-      meta: `${state.items.length} item${state.items.length === 1 ? "" : "s"} added manually`,
+      meta: `${state.items.length} item${state.items.length === 1 ? "" : "s"} added manually${elements.manualUseStock.checked ? " · quantities from stored MAIN stock" : ""}`,
     });
     if (!item.printable) showMessage(item.warning);
     elements.itemCode.value = "";
@@ -597,20 +686,27 @@ elements.sortControl.querySelectorAll("button").forEach((button) => {
   });
 });
 
-elements.printButton.addEventListener("click", async () => {
-  clearMessage();
-  const selected = state.items
+function selectedPrintItems() {
+  return state.items
     .filter((item) => item.selected && item.printable)
     .map((item) => ({ item_code: item.item_code, quantity: quantityValue(item.quantity) }));
+}
+
+async function sendPrintJob(labelSize = "standard") {
+  clearMessage();
+  const selected = selectedPrintItems();
   if (!selected.length) return;
 
   const labelCount = selected.reduce((total, item) => total + item.quantity, 0);
+  const isLarge = labelSize === "large";
+  const enabled = isLarge ? state.largePrintEnabled : state.printEnabled;
   state.busy = true;
   state.printSending = true;
   elements.printButton.disabled = true;
-  elements.printButtonLabel.textContent = state.printEnabled ? "Sending…" : "Saving…";
-  elements.printProgressMessage.textContent = state.printEnabled
-    ? `Sending ${labelCount} label${labelCount === 1 ? "" : "s"} to the printer. Large batches can take several minutes to transmit.`
+  elements.largePrintButton.disabled = true;
+  elements.printButtonLabel.textContent = enabled ? "Sending…" : "Saving…";
+  elements.printProgressMessage.textContent = enabled
+    ? `Sending ${labelCount} ${isLarge ? "large " : ""}label${labelCount === 1 ? "" : "s"} to the ${isLarge ? "Zebra" : "configured"} printer. Large batches can take several minutes to transmit.`
     : `Saving ${labelCount} test label${labelCount === 1 ? "" : "s"} without contacting the printer.`;
   if (!elements.printProgressDialog.open) elements.printProgressDialog.showModal();
   try {
@@ -620,6 +716,7 @@ elements.printButton.addEventListener("click", async () => {
         items: selected,
         source: elements.resultKicker.textContent === "PURCHASE ORDER" ? "purchase-order" : "manual",
         reference: state.reference,
+        label_size: labelSize,
       }),
     });
     const submitted = result.status === "submitted";
@@ -631,7 +728,7 @@ elements.printButton.addEventListener("click", async () => {
       title: uncertain
         ? "Printer delivery could not be fully confirmed."
         : submitted
-        ? "Barcodes sent to printer successfully."
+        ? `${isLarge ? "Large barcodes" : "Barcodes"} sent to printer successfully.`
         : "Test print job saved successfully.",
       message: uncertain
         ? `The printer accepted ${result.delivery.bytes_sent.toLocaleString("en-NZ")} of ${result.delivery.bytes_total.toLocaleString("en-NZ")} bytes before the connection stopped responding. The job was not retried. Do not print this batch again; count the physical labels and manually print only anything missing. Job ${result.job_id}.`
@@ -654,6 +751,54 @@ elements.printButton.addEventListener("click", async () => {
     if (elements.printProgressDialog.open) elements.printProgressDialog.close();
     updateSummary();
   }
+}
+
+elements.printButton.addEventListener("click", () => sendPrintJob("standard"));
+
+async function openLargePrintConfirmation() {
+  const selected = selectedPrintItems();
+  if (!selected.length || state.busy) return;
+  const labelCount = selected.reduce((total, item) => total + item.quantity, 0);
+  elements.largePrintConfirmSummary.textContent = `${labelCount} large label${labelCount === 1 ? "" : "s"} will be printed on 100 × 175 mm stock using the Zebra printer.`;
+  const dot = elements.largePrinterCheck.querySelector(".status-dot");
+  const title = elements.largePrinterCheck.querySelector("b");
+  const detail = elements.largePrinterCheck.querySelector("small");
+  dot.className = "status-dot checking";
+  title.textContent = "Checking Zebra printer…";
+  detail.textContent = "Connection is checked only when large printing is requested.";
+  elements.largePrintConfirm.disabled = true;
+  if (!elements.largePrintConfirmDialog.open) elements.largePrintConfirmDialog.showModal();
+  try {
+    const status = await api("/api/printer/status?target=large");
+    state.largePrintEnabled = Boolean(status.print_enabled);
+    dot.className = `status-dot ${status.online ? "online" : "offline"}`;
+    title.textContent = status.online
+      ? status.print_enabled ? "Zebra ready" : "Zebra found · test mode"
+      : "Zebra offline";
+    detail.textContent = status.online
+      ? `${status.model || status.name} · ${status.ip}:${status.port}`
+      : status.message || status.name;
+    elements.largePrintConfirm.disabled = !status.online && status.print_enabled;
+    elements.largePrintConfirm.textContent = status.print_enabled
+      ? "Print large labels"
+      : "Create large test job";
+  } catch (error) {
+    dot.className = "status-dot offline";
+    title.textContent = "Zebra check failed";
+    detail.textContent = error.message;
+  }
+}
+
+function closeLargePrintConfirmation() {
+  if (elements.largePrintConfirmDialog.open) elements.largePrintConfirmDialog.close();
+}
+
+elements.largePrintButton.addEventListener("click", openLargePrintConfirmation);
+document.querySelector("#large-print-confirm-close").addEventListener("click", closeLargePrintConfirmation);
+document.querySelector("#large-print-cancel").addEventListener("click", closeLargePrintConfirmation);
+elements.largePrintConfirm.addEventListener("click", async () => {
+  closeLargePrintConfirmation();
+  await sendPrintJob("large");
 });
 
 elements.printProgressDialog.addEventListener("cancel", (event) => {
@@ -915,6 +1060,9 @@ async function refreshBarcodeEntryStock() {
     });
     state.barcodeEntryStockStoredAt = response.stored_at;
     state.barcodeEntryStockFresh = true;
+    state.manualStockStoredAt = response.stored_at;
+    state.manualStockFresh = true;
+    syncManualStockControls();
     renderBarcodeEntryItems();
     showToast("MAIN stock on hand refreshed from MYOB.");
   } catch (error) {
@@ -1519,3 +1667,12 @@ if (recoveredAssignedItems.length) {
 }
 
 checkPrinter();
+checkManualStockStatus();
+
+if ("serviceWorker" in navigator && (window.isSecureContext || location.hostname === "localhost")) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {
+      // The app remains usable if the browser declines offline shell caching.
+    });
+  });
+}

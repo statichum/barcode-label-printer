@@ -6,6 +6,7 @@ import socket
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 from uuid import uuid4
 
 from .config import Settings
@@ -26,6 +27,14 @@ ITEM_CODE_BOTTOM_MARGIN_DOTS = 19
 ITEM_CODE_OVERPRINT_DOTS = 6
 BARCODE_HEIGHT_DOTS = 126
 
+LARGE_LABEL_MARGIN_DOTS = 48
+LARGE_DESCRIPTION_FONT_WIDTH_DOTS = 46
+LARGE_DESCRIPTION_FONT_HEIGHT_DOTS = 64
+LARGE_DESCRIPTION_LINE_ADVANCE_DOTS = 74
+LARGE_BARCODE_HEIGHT_DOTS = 400
+LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 76
+LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 150
+
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
     value = unicodedata.normalize("NFKD", value)
@@ -43,6 +52,12 @@ def safe_barcode(value: str) -> str:
     ):
         raise ValueError("Barcode contains unsupported characters")
     return cleaned
+
+
+def safe_zpl_text(value: str, max_length: int = 200) -> str:
+    """Keep user text from being interpreted as a ZPL command."""
+    cleaned = safe_sbpl_text(value, max_length)
+    return cleaned.replace("^", "").replace("~", "").replace("\\", "")
 
 
 def _command(code: str) -> bytes:
@@ -232,10 +247,84 @@ def build_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
     return bytes(payload)
 
 
+def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> bytes:
+    """Build a 100 x 175 mm portrait shelf/large-item label for the Zebra."""
+    if not item.barcode:
+        raise ValueError(f"{item.item_code} does not have a barcode")
+    barcode = safe_barcode(item.barcode)
+    item_code = safe_zpl_text(item.item_code, 36)
+    description = safe_zpl_text(item.description, 240)
+    width = settings.label_width_dots
+    height = settings.label_height_dots
+    if width != 800 or height != 1400:
+        raise ValueError("The large label layout supports 100 x 175 mm at 8 dots/mm")
+
+    available_width = width - (LARGE_LABEL_MARGIN_DOTS * 2)
+    description_lines = _wrap_proportional_text(
+        description,
+        available_width=available_width,
+        font_width=LARGE_DESCRIPTION_FONT_WIDTH_DOTS,
+        max_lines=3,
+    ) or [item_code]
+    description_y = LARGE_LABEL_MARGIN_DOTS
+    description_bottom = (
+        description_y
+        + ((len(description_lines) - 1) * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS)
+        + LARGE_DESCRIPTION_FONT_HEIGHT_DOTS
+    )
+
+    barcode_module, barcode_width = _code128_size(barcode, available_width)
+    barcode_x = max(LARGE_LABEL_MARGIN_DOTS, (width - barcode_width) // 2)
+    barcode_y = max(330, description_bottom + 72)
+
+    item_font_width = min(
+        LARGE_ITEM_CODE_MAX_WIDTH_DOTS,
+        max(20, available_width // max(1, len(item_code))),
+    )
+    item_font_height = min(
+        LARGE_ITEM_CODE_MAX_HEIGHT_DOTS,
+        round(LARGE_ITEM_CODE_MAX_HEIGHT_DOTS * item_font_width / LARGE_ITEM_CODE_MAX_WIDTH_DOTS),
+    )
+    item_y = min(height - LARGE_LABEL_MARGIN_DOTS - item_font_height, barcode_y + LARGE_BARCODE_HEIGHT_DOTS + 130)
+
+    payload = [
+        "^XA",
+        f"^PW{width}",
+        f"^LL{height}",
+        "^LH0,0",
+        f"^PR{settings.printer_print_speed}",
+        f"~SD{settings.large_printer_darkness}",
+    ]
+    for index, line in enumerate(description_lines):
+        y = description_y + (index * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS)
+        payload.append(
+            f"^FO{LARGE_LABEL_MARGIN_DOTS},{y}"
+            f"^A0N,{LARGE_DESCRIPTION_FONT_HEIGHT_DOTS},{LARGE_DESCRIPTION_FONT_WIDTH_DOTS}"
+            f"^FD{line}^FS"
+        )
+    payload.extend(
+        [
+            f"^BY{barcode_module},2,{LARGE_BARCODE_HEIGHT_DOTS}",
+            f"^FO{barcode_x},{barcode_y}^BCN,{LARGE_BARCODE_HEIGHT_DOTS},N,N,N^FD{barcode}^FS",
+            f"^FO{LARGE_LABEL_MARGIN_DOTS},{item_y}^FB{available_width},1,0,C,0"
+            f"^A0N,{item_font_height},{item_font_width}^FD{item_code}^FS",
+            # A second pass offset by two dots gives the distant-reading item
+            # code more weight without changing its measured width.
+            f"^FO{LARGE_LABEL_MARGIN_DOTS + 2},{item_y}^FB{available_width},1,0,C,0"
+            f"^A0N,{item_font_height},{item_font_width}^FD{item_code}^FS",
+            f"^PQ{quantity},0,1,N",
+            "^XZ",
+        ]
+    )
+    return "".join(payload).encode("ascii")
+
+
 @dataclass
 class PrintService:
     settings: Settings
     discovery: PrinterDiscovery
+    label_builder: Callable[[CatalogItem, int, Settings], bytes] = build_label
+    spool_extension: str = "sbpl"
 
     def print_items(
         self,
@@ -244,14 +333,14 @@ class PrintService:
         reference: str | None,
     ) -> dict:
         payload = b"".join(
-            build_label(item, quantity, self.settings) for item, quantity in items
+            self.label_builder(item, quantity, self.settings) for item, quantity in items
         )
         label_count = sum(quantity for _, quantity in items)
         job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
         self.settings.spool_dir.mkdir(parents=True, exist_ok=True)
-        sbpl_path = self.settings.spool_dir / f"{job_id}.sbpl"
+        spool_path = self.settings.spool_dir / f"{job_id}.{self.spool_extension}"
         metadata_path = self.settings.spool_dir / f"{job_id}.json"
-        sbpl_path.write_bytes(payload)
+        spool_path.write_bytes(payload)
 
         status = "dry-run"
         printer_ip = None

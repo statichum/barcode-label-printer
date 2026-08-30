@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=30" />
+    <link rel="stylesheet" href="/static/styles.css?v=31" />
   </head>
   <body>
     <header class="topbar">
@@ -108,6 +108,13 @@
               </button>
             </div>
             <p class="field-help">Add one item at a time; quantities can still be changed below.</p>
+            <div class="manual-stock-tools">
+              <label id="manual-stock-label" class="missing-toggle unavailable" title="Refresh stock on hand to use this quantity">
+                <input id="manual-use-stock" type="checkbox" disabled /> Use MAIN stock on hand as quantity
+              </label>
+              <button id="refresh-manual-stock" class="secondary-button" type="button">↻ Update stock from MYOB</button>
+              <small id="manual-stock-status">Stock has not been refreshed on this tablet.</small>
+            </div>
           </form>
         </div>
 
@@ -258,10 +265,16 @@
             <span class="summary-count" id="label-count">0</span>
             <span><b>labels ready</b><small id="item-count">0 items selected</small></span>
           </div>
-          <button type="button" id="print-button" class="print-button" disabled>
-            <span class="printer-icon" aria-hidden="true"></span>
-            <span id="print-button-label">Print labels</span>
-          </button>
+          <div class="print-actions">
+            <button type="button" id="large-print-button" class="large-print-button" disabled>
+              <span class="printer-icon" aria-hidden="true"></span>
+              <span>Print large labels</span>
+            </button>
+            <button type="button" id="print-button" class="print-button" disabled>
+              <span class="printer-icon" aria-hidden="true"></span>
+              <span id="print-button-label">Print labels</span>
+            </button>
+          </div>
         </footer>
       </section>
     </main>
@@ -339,6 +352,24 @@
       </div>
     </dialog>
 
+    <dialog id="large-print-confirm-dialog" class="dialog">
+      <div class="dialog-card large-print-confirm-card">
+        <button id="large-print-confirm-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">LARGE LABEL STOCK</p>
+        <h2>Print 100 × 175 mm labels?</h2>
+        <p id="large-print-confirm-summary">These labels use the Zebra printer and cost more than the normal stock.</p>
+        <div id="large-printer-check" class="large-printer-check" role="status" aria-live="polite">
+          <span class="status-dot checking"></span>
+          <span><b>Checking Zebra printer…</b><small>Connection is checked only when large printing is requested.</small></span>
+        </div>
+        <p class="write-warning">Confirm the selected quantity before continuing. Large labels are not the normal label size.</p>
+        <div class="dialog-actions">
+          <button id="large-print-cancel" class="secondary-button" type="button">Cancel</button>
+          <button id="large-print-confirm" class="danger-button" type="button" disabled>Print large labels</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="large-batch-pin-dialog" class="dialog">
       <form id="large-batch-pin-form" class="dialog-card">
         <button id="large-batch-pin-close" class="dialog-close" type="button" aria-label="Close">×</button>
@@ -371,7 +402,7 @@
         <p class="eyebrow">BARCODES ASSIGNED</p>
         <h2>Prepare stock labels?</h2>
         <p id="assignment-complete-summary"></p>
-        <p>Use the stored <b>QtyOnHand</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 12 hours and can be refreshed on demand.</p>
+        <p>Use the stored <b>QtyOnHand</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 24 hours and can be refreshed on demand.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
           <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small></span>
@@ -404,6 +435,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=30" defer></script>
+    <script src="/static/app.js?v=31" defer></script>
   </body>
 </html>
