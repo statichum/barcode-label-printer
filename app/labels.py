@@ -32,8 +32,8 @@ LARGE_DESCRIPTION_FONT_WIDTH_DOTS = 46
 LARGE_DESCRIPTION_FONT_HEIGHT_DOTS = 64
 LARGE_DESCRIPTION_LINE_ADVANCE_DOTS = 74
 LARGE_BARCODE_HEIGHT_DOTS = 100
-LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 90
-LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 180
+LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 150
+LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 240
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -281,13 +281,16 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
     barcode_x = max(290, description_bottom + 58)
     barcode_y = max(LARGE_LABEL_MARGIN_DOTS, (landscape_width - barcode_width) // 2)
 
-    item_font_width = min(
-        LARGE_ITEM_CODE_MAX_WIDTH_DOTS,
-        max(20, available_width // max(1, len(item_code))),
-    )
-    item_font_height = min(
-        LARGE_ITEM_CODE_MAX_HEIGHT_DOTS,
-        round(LARGE_ITEM_CODE_MAX_HEIGHT_DOTS * item_font_width / LARGE_ITEM_CODE_MAX_WIDTH_DOTS),
+    item_font_width = LARGE_ITEM_CODE_MAX_WIDTH_DOTS
+    while (
+        item_font_width > 20
+        and _estimated_text_width(item_code, item_font_width) > available_width
+    ):
+        item_font_width -= 1
+    item_font_height = round(
+        LARGE_ITEM_CODE_MAX_HEIGHT_DOTS
+        * item_font_width
+        / LARGE_ITEM_CODE_MAX_WIDTH_DOTS
     )
     item_text_width = _estimated_text_width(item_code, item_font_width)
     item_x = min(

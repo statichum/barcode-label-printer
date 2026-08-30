@@ -182,9 +182,19 @@ def test_large_label_uses_100_by_175_mm_zpl_layout(tmp_path):
     assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR6~SD10^FWR")
     assert b"^BCR,100,N,N,N^FD9412345678901^FS" in payload
     assert b"^A0R,64,46^FDGT8 Frameset Black Large with a" in payload
-    assert b"^A0R,180,90^FDTYSSM11159766^FS" in payload
+    assert b"^A0R,240,150^FDTYSSM11159766^FS" in payload
     assert payload.count(b"^FDTYSSM11159766^FS") == 2
     assert b"^PQ3,0,1,N^XZ" in payload
+
+
+def test_large_label_twenty_character_item_code_fills_width_with_margins(tmp_path):
+    config = settings(tmp_path).large_label_settings()
+    item_code = "ABCDEFGHIJKLMNOPQRST"
+    item = CatalogItem(item_code, "Example item", "9412345678901")
+
+    payload = build_large_label(item, 1, config)
+
+    assert b"^A0R,141,88^FDABCDEFGHIJKLMNOPQRST^FS" in payload
 
 
 def test_large_label_description_wraps_downward(tmp_path):
