@@ -31,9 +31,9 @@ LARGE_LABEL_MARGIN_DOTS = 48
 LARGE_DESCRIPTION_FONT_WIDTH_DOTS = 46
 LARGE_DESCRIPTION_FONT_HEIGHT_DOTS = 64
 LARGE_DESCRIPTION_LINE_ADVANCE_DOTS = 74
-LARGE_BARCODE_HEIGHT_DOTS = 300
-LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 76
-LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 120
+LARGE_BARCODE_HEIGHT_DOTS = 100
+LARGE_ITEM_CODE_MAX_WIDTH_DOTS = 90
+LARGE_ITEM_CODE_MAX_HEIGHT_DOTS = 180
 
 
 def safe_sbpl_text(value: str, max_length: int = 100) -> str:
@@ -306,7 +306,13 @@ def build_large_label(item: CatalogItem, quantity: int, settings: Settings) -> b
         "^FWR",
     ]
     for index, line in enumerate(description_lines):
-        x = description_y + (index * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS)
+        # With clockwise-rotated fields, increasing the physical X coordinate
+        # moves a line upward on the readable landscape label. Start line one
+        # at the largest coordinate so wrapped lines continue downward.
+        x = description_y + (
+            (len(description_lines) - index - 1)
+            * LARGE_DESCRIPTION_LINE_ADVANCE_DOTS
+        )
         payload.append(
             f"^FO{x},{LARGE_LABEL_MARGIN_DOTS}"
             f"^A0R,{LARGE_DESCRIPTION_FONT_HEIGHT_DOTS},{LARGE_DESCRIPTION_FONT_WIDTH_DOTS}"

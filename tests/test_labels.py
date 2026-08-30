@@ -179,11 +179,25 @@ def test_large_label_uses_100_by_175_mm_zpl_layout(tmp_path):
 
     payload = build_large_label(item, 3, config)
 
-    assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR2~SD20^FWR")
-    assert b"^BCR,300,N,N,N^FD9412345678901^FS" in payload
+    assert payload.startswith(b"^XA^PW800^LL1400^LH0,0^PR6~SD10^FWR")
+    assert b"^BCR,100,N,N,N^FD9412345678901^FS" in payload
     assert b"^A0R,64,46^FDGT8 Frameset Black Large with a" in payload
+    assert b"^A0R,180,90^FDTYSSM11159766^FS" in payload
     assert payload.count(b"^FDTYSSM11159766^FS") == 2
     assert b"^PQ3,0,1,N^XZ" in payload
+
+
+def test_large_label_description_wraps_downward(tmp_path):
+    config = settings(tmp_path).large_label_settings()
+    description = " ".join(["W" * 28] * 3)
+    item = CatalogItem("ITEM-1", description, "9412345678901")
+
+    payload = build_large_label(item, 1, config)
+
+    first_line = payload.index(b"^FO196,48^A0R,64,46^FD" + b"W" * 28)
+    second_line = payload.index(b"^FO122,48^A0R,64,46^FD" + b"W" * 28)
+    third_line = payload.index(b"^FO48,48^A0R,64,46^FD" + b"W" * 28)
+    assert first_line < second_line < third_line
 
 
 def test_large_label_dry_run_uses_separate_zpl_spool(tmp_path):

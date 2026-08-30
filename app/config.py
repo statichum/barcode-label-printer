@@ -113,8 +113,8 @@ class Settings:
             large_printer_mac=os.getenv("LARGE_PRINTER_MAC", "60:95:32:06:E0:CF"),
             large_printer_port=_int("LARGE_PRINTER_PORT", 9100),
             large_printer_ip_override=os.getenv("LARGE_PRINTER_IP_OVERRIDE") or None,
-            large_printer_print_speed=_int("LARGE_PRINTER_PRINT_SPEED", 2),
-            large_printer_darkness=_int("LARGE_PRINTER_DARKNESS", 20),
+            large_printer_print_speed=_int("LARGE_PRINTER_PRINT_SPEED", 6),
+            large_printer_darkness=_int("LARGE_PRINTER_DARKNESS", 10),
             large_print_enabled=_bool("LARGE_PRINT_ENABLED", False),
             large_label_width_mm=_int("LARGE_LABEL_WIDTH_MM", 100),
             large_label_height_mm=_int("LARGE_LABEL_HEIGHT_MM", 175),
@@ -171,8 +171,8 @@ class Settings:
             missing.append("PRINTER_RETRY_DELAY_MS (use zero or greater)")
         if not self.large_printer_mac:
             missing.append("LARGE_PRINTER_MAC")
-        if not 1 <= self.large_printer_print_speed <= 14:
-            missing.append("LARGE_PRINTER_PRINT_SPEED (use 1 through 14)")
+        if self.large_printer_print_speed not in {2, 3, 4, 5, 6}:
+            missing.append("LARGE_PRINTER_PRINT_SPEED (use 2 through 6)")
         if not 0 <= self.large_printer_darkness <= 30:
             missing.append("LARGE_PRINTER_DARKNESS (use 0 through 30)")
         if self.large_label_width_mm != 100 or self.large_label_height_mm != 175:
