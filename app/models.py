@@ -134,8 +134,24 @@ class BarcodeEntryItemRequest(BaseModel):
         return barcode
 
 
+class BarcodeReassignmentRequest(BarcodeEntryItemRequest):
+    from_item_code: str = Field(min_length=1, max_length=80)
+
+    @field_validator("from_item_code")
+    @classmethod
+    def clean_from_item_code(cls, value: str) -> str:
+        code = value.strip().upper()
+        if not code or any(ord(char) < 32 for char in code):
+            raise ValueError("Enter a valid conflicting item code")
+        return code
+
+
 class BarcodeEntryCommitRequest(BaseModel):
     entries: list[BarcodeEntryItemRequest] = Field(min_length=1, max_length=350)
+    reassignments: list[BarcodeReassignmentRequest] = Field(
+        default_factory=list,
+        max_length=350,
+    )
 
     @field_validator("entries")
     @classmethod
@@ -148,6 +164,21 @@ class BarcodeEntryCommitRequest(BaseModel):
         barcodes = [item.barcode.casefold() for item in values]
         if len(set(barcodes)) != len(barcodes):
             raise ValueError("Each scanned barcode may appear only once in a batch")
+        return values
+
+    @field_validator("reassignments")
+    @classmethod
+    def reject_duplicate_reassignments(
+        cls, values: list[BarcodeReassignmentRequest]
+    ) -> list[BarcodeReassignmentRequest]:
+        keys = [
+            (value.item_code, value.barcode.casefold(), value.from_item_code)
+            for value in values
+        ]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Each barcode reassignment may appear only once")
+        if any(value.item_code == value.from_item_code for value in values):
+            raise ValueError("A barcode cannot be reassigned from and to the same item")
         return values
 
 

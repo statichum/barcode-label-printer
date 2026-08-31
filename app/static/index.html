@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=31" />
+    <link rel="stylesheet" href="/static/styles.css?v=32" />
   </head>
   <body>
     <header class="topbar">
@@ -342,6 +342,20 @@
       </div>
     </dialog>
 
+    <dialog id="barcode-entry-result-dialog" class="dialog" aria-labelledby="barcode-entry-result-title" aria-describedby="barcode-entry-result-message">
+      <div class="dialog-card">
+        <button id="barcode-entry-result-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p id="barcode-entry-result-kicker" class="eyebrow">MYOB UPDATE COMPLETE</p>
+        <h2 id="barcode-entry-result-title">Barcodes saved.</h2>
+        <p id="barcode-entry-result-message"></p>
+        <div id="barcode-entry-conflicts" class="barcode-entry-conflicts" hidden></div>
+        <div class="dialog-actions barcode-entry-result-actions">
+          <button id="barcode-entry-result-done" class="secondary-button" type="button">Done</button>
+          <button id="barcode-entry-reassign" class="danger-button" type="button" hidden>Sync and remove conflicting barcode</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="print-progress-dialog" class="dialog blocking-progress-dialog">
       <div class="dialog-card" role="status" aria-live="assertive" aria-atomic="true">
         <span class="loading-spinner" aria-hidden="true"></span>
@@ -435,6 +449,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=31" defer></script>
+    <script src="/static/app.js?v=32" defer></script>
   </body>
 </html>

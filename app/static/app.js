@@ -27,6 +27,7 @@ const state = {
   barcodeEntrySelected: null,
   barcodeEntryPending: new Map(),
   barcodeEntrySending: false,
+  barcodeEntryConflicts: [],
   stockLabelRefreshRequested: false,
   barcodeCheckRequestId: 0,
   printSending: false,
@@ -88,6 +89,12 @@ const elements = {
   barcodeEntryError: document.querySelector("#barcode-entry-error"),
   barcodeEntrySendDialog: document.querySelector("#barcode-entry-send-dialog"),
   barcodeEntrySendMessage: document.querySelector("#barcode-entry-send-message"),
+  barcodeEntryResultDialog: document.querySelector("#barcode-entry-result-dialog"),
+  barcodeEntryResultKicker: document.querySelector("#barcode-entry-result-kicker"),
+  barcodeEntryResultTitle: document.querySelector("#barcode-entry-result-title"),
+  barcodeEntryResultMessage: document.querySelector("#barcode-entry-result-message"),
+  barcodeEntryConflicts: document.querySelector("#barcode-entry-conflicts"),
+  barcodeEntryReassign: document.querySelector("#barcode-entry-reassign"),
   assignLocked: document.querySelector("#assign-locked"),
   assignWorkspace: document.querySelector("#assign-workspace"),
   assignSearch: document.querySelector("#assign-search"),
@@ -235,8 +242,12 @@ async function api(path, options = {}) {
     const detail = Array.isArray(data.detail)
       ? data.detail.map((item) => item.msg).join("; ")
       : data.detail;
-    const error = new Error(detail || "The request could not be completed");
+    const message = detail && typeof detail === "object"
+      ? detail.message
+      : detail;
+    const error = new Error(message || "The request could not be completed");
     error.status = response.status;
+    error.detail = detail;
     if (barcodeAdmin && response.status === 401) {
       state.barcodeAdminToken = "";
       state.assignmentLargeBatchUnlocked = false;
@@ -1146,6 +1157,49 @@ function openBarcodeEntrySendDialog(count) {
   if (!elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.showModal();
 }
 
+function showBarcodeEntryResult({ success, title, message, conflicts = [] }) {
+  state.barcodeEntryConflicts = conflicts;
+  elements.barcodeEntryResultKicker.textContent = success
+    ? "MYOB UPDATE COMPLETE"
+    : conflicts.length
+    ? "BARCODE CLASH"
+    : "MYOB UPDATE ERROR";
+  elements.barcodeEntryResultTitle.textContent = title;
+  elements.barcodeEntryResultMessage.textContent = message;
+  elements.barcodeEntryConflicts.replaceChildren();
+  elements.barcodeEntryConflicts.hidden = conflicts.length === 0;
+  for (const conflict of conflicts) {
+    const row = document.createElement("div");
+    row.className = "barcode-entry-conflict";
+    const owners = conflict.owner_item_codes.join(", ");
+    row.innerHTML = "<b></b><small></small>";
+    row.querySelector("b").textContent = `${conflict.barcode}: ${conflict.item_code}`;
+    row.querySelector("small").textContent = `Currently linked to ${owners}`;
+    elements.barcodeEntryConflicts.append(row);
+  }
+  elements.barcodeEntryReassign.hidden = conflicts.length === 0;
+  if (conflicts.length === 1 && conflicts[0].owner_item_codes.length === 1) {
+    elements.barcodeEntryReassign.textContent =
+      `Sync and remove from ${conflicts[0].owner_item_codes[0]}`;
+  } else {
+    const ownerCount = conflicts.reduce(
+      (count, conflict) => count + conflict.owner_item_codes.length,
+      0
+    );
+    elements.barcodeEntryReassign.textContent =
+      `Sync and remove from ${ownerCount} conflicting items`;
+  }
+  if (!elements.barcodeEntryResultDialog.open) {
+    elements.barcodeEntryResultDialog.showModal();
+  }
+}
+
+function closeBarcodeEntryResult() {
+  if (elements.barcodeEntryResultDialog.open) {
+    elements.barcodeEntryResultDialog.close();
+  }
+}
+
 elements.barcodeEntrySendDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
 });
@@ -1155,7 +1209,7 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
-elements.sendEnteredBarcodes.addEventListener("click", async () => {
+async function sendEnteredBarcodeBatch(reassignments = []) {
   if (!state.barcodeEntryPending.size || state.busy) return;
   const sendingCount = state.barcodeEntryPending.size;
   clearMessage();
@@ -1171,6 +1225,7 @@ elements.sendEnteredBarcodes.addEventListener("click", async () => {
           item_code: entry.item_code,
           barcode: entry.barcode,
         })),
+        reassignments,
       }),
     });
     const enteredByCode = new Map(
@@ -1184,15 +1239,65 @@ elements.sendEnteredBarcodes.addEventListener("click", async () => {
     });
     state.barcodeEntryPending.clear();
     renderBarcodeEntryItems();
-    showToast(`${result.count} product barcode${result.count === 1 ? "" : "s"} saved to MYOB.`);
+    if (elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.close();
+    const reassignmentCopy = result.reassigned_count
+      ? ` ${result.reassigned_count} conflicting link${result.reassigned_count === 1 ? " was" : "s were"} removed.`
+      : "";
+    showBarcodeEntryResult({
+      success: true,
+      title: "Barcodes saved.",
+      message: `${result.count} product barcode${result.count === 1 ? " was" : "s were"} saved to MYOB.${reassignmentCopy}`,
+    });
   } catch (error) {
-    showMessage(error.message);
+    if (elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.close();
+    const conflicts = error.detail?.code === "barcode_ownership_conflict"
+      && Array.isArray(error.detail.conflicts)
+      ? error.detail.conflicts
+      : [];
+    if (conflicts.length) {
+      showBarcodeEntryResult({
+        success: false,
+        title: "Barcode clash found.",
+        message: "Nothing was changed. Check the clash below. If the scanned barcode is correct, use the red button to remove it from the incorrect item and sync this batch.",
+        conflicts,
+      });
+    } else {
+      showBarcodeEntryResult({
+        success: false,
+        title: "Barcodes were not saved.",
+        message: `${error.message} Check the error and retry the batch.`,
+      });
+    }
   } finally {
     state.busy = false;
     state.barcodeEntrySending = false;
     if (elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.close();
     renderBarcodeEntryItems();
   }
+}
+
+elements.sendEnteredBarcodes.addEventListener("click", () => {
+  sendEnteredBarcodeBatch();
+});
+
+document.querySelector("#barcode-entry-result-close").addEventListener(
+  "click",
+  closeBarcodeEntryResult
+);
+document.querySelector("#barcode-entry-result-done").addEventListener(
+  "click",
+  closeBarcodeEntryResult
+);
+elements.barcodeEntryReassign.addEventListener("click", () => {
+  const reassignments = state.barcodeEntryConflicts.flatMap((conflict) =>
+    conflict.owner_item_codes.map((fromItemCode) => ({
+      item_code: conflict.item_code,
+      barcode: conflict.barcode,
+      from_item_code: fromItemCode,
+    }))
+  );
+  closeBarcodeEntryResult();
+  sendEnteredBarcodeBatch(reassignments);
 });
 
 function showAssignmentAccess() {

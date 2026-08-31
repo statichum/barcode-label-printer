@@ -6,6 +6,7 @@ from app.models import (
     BarcodeAssignmentPreviewRequest,
     BarcodeEntryCommitRequest,
     BarcodeEntryItemRequest,
+    BarcodeReassignmentRequest,
     ManualItemLookupRequest,
     PrintItemRequest,
     PrintRequest,
@@ -99,4 +100,33 @@ def test_entered_barcode_batch_rejects_duplicate_items_and_barcodes():
                 BarcodeEntryItemRequest(item_code="ITEM1", barcode="ABC-1234"),
                 BarcodeEntryItemRequest(item_code="ITEM2", barcode="abc-1234"),
             ]
+        )
+
+
+def test_barcode_reassignment_normalizes_both_item_codes():
+    request = BarcodeReassignmentRequest(
+        item_code=" target ",
+        barcode="012345678905",
+        from_item_code=" owner ",
+    )
+
+    assert request.item_code == "TARGET"
+    assert request.from_item_code == "OWNER"
+
+
+def test_barcode_reassignment_cannot_use_the_same_source_and_target():
+    with pytest.raises(ValidationError, match="cannot be reassigned"):
+        BarcodeEntryCommitRequest(
+            entries=[
+                BarcodeEntryItemRequest(
+                    item_code="ITEM1", barcode="012345678905"
+                )
+            ],
+            reassignments=[
+                BarcodeReassignmentRequest(
+                    item_code="ITEM1",
+                    barcode="012345678905",
+                    from_item_code="ITEM1",
+                )
+            ],
         )

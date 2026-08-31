@@ -169,8 +169,78 @@ def test_barcode_entry_rejects_a_catalogue_collision_before_writing(
     )
 
     assert response.status_code == 409
-    assert "already used by OWNER" in response.json()["detail"]
+    assert response.json()["detail"] == {
+        "code": "barcode_ownership_conflict",
+        "message": "1 barcode clashes with another MYOB item",
+        "conflicts": [
+            {
+                "barcode": "012345678905",
+                "item_code": "TARGET",
+                "owner_item_codes": ["OWNER"],
+            }
+        ],
+    }
     myob.assign_barcode.assert_not_called()
+
+
+def test_barcode_entry_can_confirm_removal_from_the_wrong_owner(
+    tmp_path, monkeypatch
+):
+    configured = settings(tmp_path, barcode_assignment_enabled=True)
+    target = stock_item("TARGET")
+    owner = stock_item(
+        "OWNER",
+        barcode="012345678905",
+        barcode_reference_id="owner-xref",
+        barcode_reference_value="012345678905",
+    )
+    verified_target = stock_item(
+        "TARGET",
+        barcode="012345678905",
+        barcode_reference_id="target-xref",
+        barcode_reference_value="012345678905",
+    )
+    verified_owner = stock_item("OWNER")
+    myob = MagicMock()
+    myob.get_assignment_stock_items.side_effect = [
+        {"TARGET": target, "OWNER": owner},
+        {"TARGET": verified_target, "OWNER": verified_owner},
+    ]
+    update_catalog = MagicMock()
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    monkeypatch.setattr(
+        main,
+        "load_assignment_catalog",
+        lambda: ([target, owner], 1.0),
+    )
+    monkeypatch.setattr(main, "update_stored_assignment_catalog", update_catalog)
+
+    response = TestClient(main.app).post(
+        "/api/barcode-entry/commit",
+        json={
+            "entries": [
+                {"item_code": "TARGET", "barcode": "012345678905"}
+            ],
+            "reassignments": [
+                {
+                    "item_code": "TARGET",
+                    "barcode": "012345678905",
+                    "from_item_code": "OWNER",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reassigned_count"] == 1
+    myob.remove_barcode.assert_called_once_with("OWNER", "owner-xref")
+    myob.assign_barcode.assert_called_once_with(
+        "TARGET", "012345678905", None
+    )
+    update_catalog.assert_called_once_with(
+        {"TARGET": verified_target, "OWNER": verified_owner}
+    )
 
 
 def test_barcode_entry_respects_the_existing_write_enable_switch(

@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v31" in service_worker.text
+    assert "prv-label-station-v32" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -110,6 +110,8 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert 'id="barcode-entry-in-stock-only"' in page
     assert "In-stock items only" in page
     assert 'id="barcode-entry-send-dialog"' in page
+    assert 'id="barcode-entry-result-dialog"' in page
+    assert 'id="barcode-entry-reassign"' in page
     assert 'id="refresh-and-prepare-stock-labels"' in page
     assert "On hand" in page
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
@@ -124,5 +126,13 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert "Number(item.stock_on_hand) <= 0" in script
     assert 'elements.barcodeEntrySendDialog.showModal()' in script
     assert 'elements.barcodeEntrySendDialog.addEventListener("cancel"' in script
+    assert 'error.detail?.code === "barcode_ownership_conflict"' in script
+    assert "Sync and remove from" in script
     assert 'window.addEventListener("beforeunload"' in script
     assert "if (state.barcodeEntrySending || state.printSending) return;" in script
+
+
+def test_android_pull_to_refresh_is_disabled():
+    styles = client.get("/static/styles.css").text
+
+    assert "html, body { overscroll-behavior-y: none; }" in styles

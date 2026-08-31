@@ -26,6 +26,17 @@ class BarcodeAssignmentConflict(MyobError):
     pass
 
 
+class BarcodeOwnershipConflict(BarcodeAssignmentConflict):
+    def __init__(self, conflicts: list[dict]):
+        self.conflicts = conflicts
+        count = len(conflicts)
+        super().__init__(
+            "1 barcode clashes with another MYOB item"
+            if count == 1
+            else f"{count} barcodes clash with other MYOB items"
+        )
+
+
 def _value(obj: dict, key: str, default=None):
     field = obj.get(key, {})
     return field.get("value", default) if isinstance(field, dict) else default
@@ -386,6 +397,7 @@ def plan_entered_barcodes(
     entries: list[dict],
     current_items: dict[str, dict],
     stock_items: list[dict],
+    reassignment_approvals: list[dict] | None = None,
 ) -> list[dict]:
     used_by_barcode: dict[str, set[str]] = {}
     for item in stock_items:
@@ -395,6 +407,17 @@ def plan_entered_barcodes(
             if value and value.casefold() != "x":
                 used_by_barcode.setdefault(value.casefold(), set()).add(item_code)
 
+    approvals = {
+        (
+            approval["item_code"].upper(),
+            approval["barcode"].strip().casefold(),
+            approval["from_item_code"].upper(),
+        )
+        for approval in (reassignment_approvals or [])
+    }
+    used_approvals: set[tuple[str, str, str]] = set()
+    conflicts: list[dict] = []
+    stock_by_code = {item["item_code"].upper(): item for item in stock_items}
     planned: list[dict] = []
     proposed: set[str] = set()
     for entry in entries:
@@ -421,14 +444,43 @@ def plan_entered_barcodes(
 
         owners = used_by_barcode.get(barcode_key, set())
         other_owners = sorted(owner for owner in owners if owner != requested_code)
-        if other_owners:
-            raise BarcodeAssignmentConflict(
-                f"Barcode {barcode} is already used by {', '.join(other_owners)}"
-            )
         if barcode_key in proposed:
             raise BarcodeAssignmentConflict(
                 f"Barcode {barcode} appears more than once in this batch"
             )
+
+        transfer_sources = []
+        unapproved_owners = []
+        for owner_code in other_owners:
+            approval_key = (requested_code, barcode_key, owner_code)
+            if approval_key not in approvals:
+                unapproved_owners.append(owner_code)
+                continue
+            owner = stock_by_code[owner_code]
+            if (
+                owner.get("barcode_reference_count") != 1
+                or not owner.get("barcode_reference_id")
+            ):
+                raise BarcodeAssignmentConflict(
+                    f"{owner['item_code']} no longer has one removable Barcode row"
+                )
+            transfer_sources.append(
+                {
+                    "item_code": owner["item_code"],
+                    "barcode": barcode,
+                    "cross_reference_id": owner["barcode_reference_id"],
+                }
+            )
+            used_approvals.add(approval_key)
+        if unapproved_owners:
+            conflicts.append(
+                {
+                    "barcode": barcode,
+                    "item_code": item["item_code"],
+                    "owner_item_codes": unapproved_owners,
+                }
+            )
+            continue
 
         planned.append(
             {
@@ -444,9 +496,16 @@ def plan_entered_barcodes(
                 ),
                 "previous_barcode": item.get("barcode_reference_value"),
                 "cross_reference_id": item.get("barcode_reference_id"),
+                "remove_from": transfer_sources,
             }
         )
         proposed.add(barcode_key)
+    if conflicts:
+        raise BarcodeOwnershipConflict(conflicts)
+    if approvals - used_approvals:
+        raise BarcodeAssignmentConflict(
+            "Barcode ownership changed after the clash was shown; check the errors and retry"
+        )
     return planned
 
 
@@ -672,6 +731,27 @@ class MyobClient:
             suffix = f": {detail}" if detail else ""
             raise MyobError(
                 f"MYOB rejected barcode {barcode} for {item_code} "
+                f"with HTTP {response.status_code}{suffix}"
+            ) from exc
+
+    def remove_barcode(self, item_code: str, cross_reference_id: str) -> None:
+        response = self._authenticated_request(
+            "PUT",
+            f"{self.settings.myob_api_root}/StockItem",
+            json={
+                "InventoryID": {"value": item_code},
+                "CrossReferences": [
+                    {"id": cross_reference_id, "delete": True},
+                ],
+            },
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            detail = _response_error_detail(response)
+            suffix = f": {detail}" if detail else ""
+            raise MyobError(
+                f"MYOB could not remove the conflicting barcode from {item_code} "
                 f"with HTTP {response.status_code}{suffix}"
             ) from exc
 

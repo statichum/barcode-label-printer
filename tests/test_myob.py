@@ -3,7 +3,7 @@ import pytest
 
 from app.database import CatalogItem
 from app.myob import (
-    BarcodeAssignmentConflict,
+    BarcodeOwnershipConflict,
     MyobClient,
     MyobError,
     ean13_internal_barcode,
@@ -296,7 +296,7 @@ def test_entered_barcode_plan_replaces_x_and_existing_real_barcodes():
     assert replacement[0]["cross_reference_id"] == "xref-x"
 
 
-def test_entered_barcode_plan_rejects_a_value_used_by_another_item():
+def test_entered_barcode_plan_reports_a_value_used_by_another_item():
     target = {
         "item_code": "TARGET",
         "description": "Target",
@@ -318,12 +318,64 @@ def test_entered_barcode_plan_rejects_a_value_used_by_another_item():
         "alternate_ids": {"012345678905"},
     }
 
-    with pytest.raises(BarcodeAssignmentConflict, match="already used by OWNER"):
+    with pytest.raises(BarcodeOwnershipConflict) as raised:
         plan_entered_barcodes(
             [{"item_code": "TARGET", "barcode": "012345678905"}],
             {"TARGET": target},
             [target, owner],
         )
+
+    assert raised.value.conflicts == [
+        {
+            "barcode": "012345678905",
+            "item_code": "TARGET",
+            "owner_item_codes": ["OWNER"],
+        }
+    ]
+
+
+def test_entered_barcode_plan_accepts_an_explicit_owner_transfer():
+    target = {
+        "item_code": "TARGET",
+        "description": "Target",
+        "barcode": None,
+        "barcode_reference_id": None,
+        "barcode_reference_value": None,
+        "barcode_reference_count": 0,
+        "status": "Active",
+        "barcode_ids": set(),
+    }
+    owner = {
+        **target,
+        "item_code": "OWNER",
+        "description": "Owner",
+        "barcode": "012345678905",
+        "barcode_reference_id": "owner-xref",
+        "barcode_reference_value": "012345678905",
+        "barcode_reference_count": 1,
+        "barcode_ids": {"012345678905"},
+    }
+
+    planned = plan_entered_barcodes(
+        [{"item_code": "TARGET", "barcode": "012345678905"}],
+        {"TARGET": target, "OWNER": owner},
+        [target, owner],
+        [
+            {
+                "item_code": "TARGET",
+                "barcode": "012345678905",
+                "from_item_code": "OWNER",
+            }
+        ],
+    )
+
+    assert planned[0]["remove_from"] == [
+        {
+            "item_code": "OWNER",
+            "barcode": "012345678905",
+            "cross_reference_id": "owner-xref",
+        }
+    ]
 
 
 def test_entered_barcode_plan_ignores_non_barcode_cross_references():
@@ -486,6 +538,31 @@ def test_barcode_assignment_put_creates_row_when_none_exists(tmp_path):
         '{"InventoryID":{"value":"NEW1"},"CrossReferences":['
         '{"AlternateID":{"value":"0400000000015"},'
         '"AlternateType":{"value":"Barcode"},"UOM":{"value":"EACH"}}]}'
+    )
+
+
+def test_barcode_removal_deletes_only_the_selected_barcode_row(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        return httpx.Response(200, json={})
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    client.remove_barcode("WRONG-ITEM", "barcode-xref-id")
+    client._client.close()
+
+    assert requests[-1].read().decode() == (
+        '{"InventoryID":{"value":"WRONG-ITEM"},"CrossReferences":['
+        '{"id":"barcode-xref-id","delete":true}]}'
     )
 
 

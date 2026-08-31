@@ -30,6 +30,7 @@ from .models import (
 )
 from .myob import (
     BarcodeAssignmentConflict,
+    BarcodeOwnershipConflict,
     MyobClient,
     MyobError,
     PurchaseOrderNotFound,
@@ -68,7 +69,7 @@ large_printing = PrintService(
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.13.0",
+    version="1.14.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -544,8 +545,13 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
     with barcode_entry_lock:
         try:
             catalogue, _ = load_assignment_catalog()
+            reassignment_item_codes = [
+                reassignment.from_item_code
+                for reassignment in request.reassignments
+            ]
             current_items = myob.get_assignment_stock_items(
                 [entry.item_code for entry in request.entries]
+                + reassignment_item_codes
             )
             validation_items = [
                 current_items.get(item["item_code"].upper(), item)
@@ -555,7 +561,17 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
                 [entry.model_dump() for entry in request.entries],
                 current_items,
                 validation_items,
+                [entry.model_dump() for entry in request.reassignments],
             )
+        except BarcodeOwnershipConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "barcode_ownership_conflict",
+                    "message": str(exc),
+                    "conflicts": exc.conflicts,
+                },
+            ) from exc
         except BarcodeAssignmentConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except MyobError as exc:
@@ -563,18 +579,47 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         written = []
+        removed = []
         try:
+            removals = {
+                (
+                    removal["item_code"],
+                    removal["barcode"],
+                    removal["cross_reference_id"],
+                )
+                for entry in planned
+                for removal in entry.get("remove_from", [])
+            }
+            removed_reference_ids = set()
+            for item_code, barcode, cross_reference_id in sorted(removals):
+                myob.remove_barcode(item_code, cross_reference_id)
+                removed.append(
+                    {
+                        "item_code": item_code,
+                        "barcode": barcode,
+                    }
+                )
+                removed_reference_ids.add(cross_reference_id)
             for entry in planned:
                 if entry["action"] == "unchanged":
                     continue
+                target_reference_id = entry.get("cross_reference_id")
+                if target_reference_id in removed_reference_ids:
+                    target_reference_id = None
                 myob.assign_barcode(
                     entry["item_code"],
                     entry["barcode"],
-                    entry.get("cross_reference_id"),
+                    target_reference_id,
                 )
                 written.append(entry)
+            verification_codes = list(
+                dict.fromkeys(
+                    [entry["item_code"] for entry in planned]
+                    + [removal["item_code"] for removal in removed]
+                )
+            )
             verified = myob.get_assignment_stock_items(
-                [entry["item_code"] for entry in planned]
+                verification_codes
             )
             failed_verification = [
                 entry["item_code"]
@@ -588,13 +633,40 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
                     "MYOB did not return the entered barcode for: "
                     + ", ".join(failed_verification)
                 )
+            expected_by_code = {
+                entry["item_code"].upper(): entry["barcode"].casefold()
+                for entry in planned
+            }
+            failed_removals = [
+                removal["item_code"]
+                for removal in removed
+                if verified.get(removal["item_code"].upper()) is None
+                or (
+                    removal["barcode"].casefold()
+                    in {
+                        value.casefold()
+                        for value in _barcode_reference_values(
+                            verified[removal["item_code"].upper()]
+                        )
+                    }
+                    and expected_by_code.get(removal["item_code"].upper())
+                    != removal["barcode"].casefold()
+                )
+            ]
+            if failed_removals:
+                raise MyobError(
+                    "MYOB still returned the conflicting barcode for: "
+                    + ", ".join(failed_removals)
+                )
         except MyobError as exc:
             logger.exception(
-                "Direct barcode entry failed after %s successful writes", len(written)
+                "Direct barcode entry failed after %s removals and %s writes",
+                len(removed),
+                len(written),
             )
             suffix = (
-                f" {len(written)} item(s) were already updated; refresh before retrying."
-                if written
+                " MYOB may contain partial changes; refresh from MYOB before retrying."
+                if written or removed
                 else ""
             )
             raise HTTPException(
@@ -607,6 +679,7 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
             "entered": planned,
             "count": len(planned),
             "written_count": len(written),
+            "reassigned_count": len(removed),
         }
 
 
