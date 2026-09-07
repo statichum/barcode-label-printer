@@ -282,7 +282,7 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
 .assign-item-row > div { min-width: 0; display: flex; justify-content: center; flex-direction: column; padding: 13px 18px; }
 .assign-item-row > div + div { border-left: 1px solid #e5e9e4; }
 .assign-item-row .assign-check { align-items: center; }
-.assign-item-row > div:nth-child(2) > b { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; line-height: 1.35; white-space: normal; }
+.assign-item-row > div:nth-child(2) > b { display: block; width: 100%; min-width: 0; max-height: 2.7em; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; text-overflow: clip; white-space: normal !important; }
 .assign-item-row code { margin-top: 5px; color: #587069; font: 650 11px ui-monospace, monospace; }
 .assign-current-barcode code { margin: 0; color: var(--ink); }
 .assign-current-barcode .missing-barcode { color: var(--danger); }

@@ -1,8 +1,8 @@
-const CACHE = "prv-label-station-v34";
+const CACHE = "prv-label-station-v35";
 const SHELL = [
   "/",
-  "/static/styles.css?v=34",
-  "/static/app.js?v=34",
+  "/static/styles.css?v=35",
+  "/static/app.js?v=35",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",
   "/static/icon-512.png",
