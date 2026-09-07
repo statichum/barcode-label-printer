@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v33" in service_worker.text
+    assert "prv-label-station-v34" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -140,3 +140,11 @@ def test_android_pull_to_refresh_is_disabled():
     styles = client.get("/static/styles.css").text
 
     assert "html, body { overscroll-behavior-y: none; }" in styles
+
+
+def test_barcode_catalogue_descriptions_expand_to_two_lines_only_when_needed():
+    styles = client.get("/static/styles.css").text
+
+    assert ".assign-item-row > div:nth-child(2) > b" in styles
+    assert "-webkit-line-clamp: 2" in styles
+    assert "white-space: normal" in styles
