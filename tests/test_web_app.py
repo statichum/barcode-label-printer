@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v32" in service_worker.text
+    assert "prv-label-station-v33" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -115,7 +115,11 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert 'id="refresh-and-prepare-stock-labels"' in page
     assert "On hand" in page
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
-    assert 'api("/api/barcode-entry/commit"' in script
+    assert 'api("/api/barcode-entry/jobs"' in script
+    assert 'api(`/api/barcode-entry/jobs/${encodeURIComponent(jobId)}`)' in script
+    assert 'id="barcode-entry-send-progress"' in page
+    assert 'api("/api/barcode-admin/assignments/jobs"' in script
+    assert 'id="assignment-send-progress"' in page
     assert 'api("/api/barcode-entry/stock-on-hand/refresh"' in script
     assert '"?refresh_stock=true"' in script
     assert "terms.every((term) => searchable.includes(term))" in script

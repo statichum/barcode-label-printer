@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from app import main
+from app.models import BarcodeAssignmentCommitRequest
 from app.myob import ean13_internal_barcode
 from tests.helpers import settings
 
@@ -142,6 +143,59 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
     }
     assert stock_labels.json()["stock_stored_at"] == stock_stored_at
     myob.get_main_qty_on_hand.assert_not_called()
+
+
+def test_internal_assignment_background_job_reports_progress(tmp_path, monkeypatch):
+    configured = settings(tmp_path, barcode_assignment_enabled=True)
+    token = "assignment-job-token"
+    assignment = {
+        "item_code": "NEW",
+        "description": "Description for NEW",
+        "barcode": "0400000000017",
+        "action": "create",
+        "previous_barcode": None,
+        "cross_reference_id": None,
+    }
+
+    def prepare(request: BarcodeAssignmentCommitRequest, admin_token: str):
+        assert request.preview_token == "preview-token-12345678"
+        assert admin_token == token
+        return [assignment]
+
+    def commit(assignments, admin_token, progress):
+        assert admin_token == token
+        progress("sending", 1, 1, "1/1 sent to MYOB")
+        progress("checking", 1, 1, "Checking 1/1 in MYOB")
+        return {"assigned": assignments, "count": 1}
+
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "_prepare_barcode_assignment_commit", prepare)
+    monkeypatch.setattr(main, "_commit_barcode_assignments", commit)
+    main.barcode_admin_sessions[token] = time.monotonic() + 60
+    with main.barcode_assignment_jobs_lock:
+        main.barcode_assignment_jobs.clear()
+    client = TestClient(main.app)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    started = client.post(
+        "/api/barcode-admin/assignments/jobs",
+        headers=headers,
+        json={"preview_token": "preview-token-12345678"},
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    for _ in range(50):
+        job = client.get(
+            f"/api/barcode-admin/assignments/jobs/{job_id}", headers=headers
+        ).json()
+        if job["status"] == "complete":
+            break
+        time.sleep(0.01)
+
+    assert job["status"] == "complete"
+    assert job["result"]["assigned"] == [assignment]
+    assert "admin_token" not in job
 
 
 def test_stock_labels_require_a_fresh_cache_and_refresh_only_on_request(

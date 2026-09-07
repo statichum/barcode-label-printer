@@ -1,9 +1,11 @@
 import time
+import threading
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from app import main
+from app.models import BarcodeEntryCommitRequest
 from tests.helpers import settings
 
 
@@ -308,3 +310,110 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
     assert expired.json()["items"][0]["stock_on_hand"] is None
     assert expired.json()["stock_cache_fresh"] is False
     myob.get_main_qty_on_hand.assert_not_called()
+
+
+def test_barcode_entry_writes_use_the_configured_bounded_concurrency(
+    tmp_path, monkeypatch
+):
+    configured = settings(
+        tmp_path,
+        barcode_assignment_enabled=True,
+        myob_barcode_write_concurrency=2,
+    )
+    items = [stock_item(f"ITEM{number}") for number in range(6)]
+    barcodes = {f"ITEM{number}": f"94000000000{number}" for number in range(6)}
+    active = 0
+    maximum_active = 0
+    counter_lock = threading.Lock()
+
+    def assign_barcode(*_args):
+        nonlocal active, maximum_active
+        with counter_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.02)
+        with counter_lock:
+            active -= 1
+
+    def get_items(codes):
+        if len(codes) == 6:
+            return {item["item_code"]: item for item in items}
+        return {
+            code: stock_item(
+                code,
+                barcode=barcodes[code],
+                barcode_reference_id=f"xref-{code}",
+                barcode_reference_value=barcodes[code],
+            )
+            for code in codes
+        }
+
+    myob = MagicMock()
+    myob.assign_barcode.side_effect = assign_barcode
+    myob.get_assignment_stock_items.side_effect = get_items
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    monkeypatch.setattr(main, "load_assignment_catalog", lambda: (items, 1.0))
+    monkeypatch.setattr(main, "update_stored_assignment_catalog", MagicMock())
+    progress = []
+    request = BarcodeEntryCommitRequest(
+        entries=[
+            {"item_code": code, "barcode": barcode}
+            for code, barcode in barcodes.items()
+        ]
+    )
+
+    result = main._commit_entered_barcodes(
+        request,
+        lambda phase, completed, total, message: progress.append(
+            (phase, completed, total, message)
+        ),
+    )
+
+    assert result["count"] == 6
+    assert maximum_active == 2
+    assert ("sending", 6, 6, "6/6 sent to MYOB") in progress
+    assert ("complete", 6, 6, "6/6 confirmed in MYOB") in progress
+
+
+def test_barcode_entry_background_job_reports_progress(tmp_path, monkeypatch):
+    configured = settings(tmp_path, barcode_assignment_enabled=True)
+
+    def commit(request, progress):
+        progress("sending", 1, 2, "1/2 sent to MYOB")
+        progress("checking", 2, 2, "Checking 2/2 in MYOB")
+        return {
+            "entered": [entry.model_dump() for entry in request.entries],
+            "removed": [],
+            "count": 2,
+            "written_count": 2,
+            "reassigned_count": 0,
+        }
+
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "_commit_entered_barcodes", commit)
+    with main.barcode_entry_jobs_lock:
+        main.barcode_entry_jobs.clear()
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/barcode-entry/jobs",
+        json={
+            "entries": [
+                {"item_code": "ITEM1", "barcode": "940000000001"},
+                {"item_code": "ITEM2", "barcode": "940000000002"},
+            ]
+        },
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    for _ in range(50):
+        job = client.get(f"/api/barcode-entry/jobs/{job_id}").json()
+        if job["status"] == "complete":
+            break
+        time.sleep(0.01)
+
+    assert job["status"] == "complete"
+    assert job["phase"] == "complete"
+    assert job["completed"] == 2
+    assert job["result"]["count"] == 2

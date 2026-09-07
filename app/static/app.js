@@ -16,6 +16,7 @@ const state = {
   assignmentVisibleLimit: 250,
   assignmentSelected: new Set(),
   assignmentPreview: null,
+  assignmentSending: false,
   assignmentStoredAt: null,
   assignmentLargeBatchUnlocked: false,
   lastAssignedItems: [],
@@ -89,6 +90,7 @@ const elements = {
   barcodeEntryError: document.querySelector("#barcode-entry-error"),
   barcodeEntrySendDialog: document.querySelector("#barcode-entry-send-dialog"),
   barcodeEntrySendMessage: document.querySelector("#barcode-entry-send-message"),
+  barcodeEntrySendProgress: document.querySelector("#barcode-entry-send-progress"),
   barcodeEntryResultDialog: document.querySelector("#barcode-entry-result-dialog"),
   barcodeEntryResultKicker: document.querySelector("#barcode-entry-result-kicker"),
   barcodeEntryResultTitle: document.querySelector("#barcode-entry-result-title"),
@@ -116,6 +118,9 @@ const elements = {
   assignmentPreviewDialog: document.querySelector("#assignment-preview-dialog"),
   assignmentPreviewList: document.querySelector("#assignment-preview-list"),
   assignmentWriteWarning: document.querySelector("#assignment-write-warning"),
+  assignmentSendProgress: document.querySelector("#assignment-send-progress"),
+  assignmentSendMessage: document.querySelector("#assignment-send-message"),
+  assignmentSendMeter: document.querySelector("#assignment-send-meter"),
   commitAssignments: document.querySelector("#commit-assignments"),
   assignmentCompleteDialog: document.querySelector("#assignment-complete-dialog"),
   assignmentCompleteSummary: document.querySelector("#assignment-complete-summary"),
@@ -1153,8 +1158,70 @@ elements.barcodeEntryForm.addEventListener("submit", (event) => {
 });
 
 function openBarcodeEntrySendDialog(count) {
-  elements.barcodeEntrySendMessage.textContent = `MYOB is updating and verifying ${count} product barcode${count === 1 ? "" : "s"}.`;
+  elements.barcodeEntrySendMessage.textContent = `Preparing ${count} product barcode${count === 1 ? "" : "s"}…`;
+  elements.barcodeEntrySendProgress.max = count;
+  elements.barcodeEntrySendProgress.value = 0;
   if (!elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.showModal();
+}
+
+function applyConfirmedBarcodeChanges(updatedItems, removedItems = []) {
+  const changes = new Map();
+  removedItems.forEach((item) => changes.set(item.item_code.toLocaleUpperCase(), null));
+  updatedItems.forEach((item) => changes.set(item.item_code.toLocaleUpperCase(), item.barcode));
+  const updateList = (items) => items.forEach((item) => {
+    const key = item.item_code.toLocaleUpperCase();
+    if (!changes.has(key)) return;
+    const barcode = changes.get(key);
+    item.barcode = barcode;
+    if (Object.hasOwn(item, "barcode_entry_allowed")) {
+      item.barcode_entry_allowed = true;
+      item.warning = barcode ? `Current barcode ${barcode} will be replaced` : null;
+    }
+    if (Object.hasOwn(item, "assignable")) {
+      item.assignable = true;
+      item.warning = null;
+    }
+    if (Object.hasOwn(item, "printable")) {
+      item.printable = Boolean(barcode);
+      if (!barcode) item.selected = false;
+      item.warning = barcode ? null : "No barcode cross-reference found in MYOB";
+    }
+  });
+  updateList(state.barcodeEntryItems);
+  updateList(state.assignmentItems);
+  updateList(state.items);
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForBarcodeEntryJob(jobId) {
+  let pollingFailures = 0;
+  while (true) {
+    let job;
+    try {
+      job = await api(`/api/barcode-entry/jobs/${encodeURIComponent(jobId)}`);
+      pollingFailures = 0;
+    } catch (error) {
+      pollingFailures += 1;
+      if (pollingFailures > 10 || (error.status && error.status < 500)) throw error;
+      elements.barcodeEntrySendMessage.textContent = "Reconnecting to update status…";
+      await wait(1000);
+      continue;
+    }
+    elements.barcodeEntrySendMessage.textContent = job.message;
+    elements.barcodeEntrySendProgress.max = Math.max(1, job.total);
+    elements.barcodeEntrySendProgress.value = job.completed;
+    if (job.status === "complete") return job.result;
+    if (job.status === "failed") {
+      const error = new Error(job.error || "The MYOB barcode update failed.");
+      error.status = job.http_status;
+      error.detail = job.detail;
+      throw error;
+    }
+    await wait(400);
+  }
 }
 
 function showBarcodeEntryResult({ success, title, message, conflicts = [] }) {
@@ -1204,7 +1271,7 @@ elements.barcodeEntrySendDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
 });
 window.addEventListener("beforeunload", (event) => {
-  if (!state.barcodeEntrySending && !state.printSending) return;
+  if (!state.barcodeEntrySending && !state.assignmentSending && !state.printSending) return;
   event.preventDefault();
   event.returnValue = "";
 });
@@ -1218,7 +1285,7 @@ async function sendEnteredBarcodeBatch(reassignments = []) {
   openBarcodeEntrySendDialog(sendingCount);
   updateBarcodeEntrySummary();
   try {
-    const result = await api("/api/barcode-entry/commit", {
+    const started = await api("/api/barcode-entry/jobs", {
       method: "POST",
       body: JSON.stringify({
         entries: [...state.barcodeEntryPending.values()].map((entry) => ({
@@ -1228,15 +1295,8 @@ async function sendEnteredBarcodeBatch(reassignments = []) {
         reassignments,
       }),
     });
-    const enteredByCode = new Map(
-      result.entered.map((entry) => [entry.item_code, entry.barcode])
-    );
-    state.barcodeEntryItems.forEach((item) => {
-      if (!enteredByCode.has(item.item_code)) return;
-      item.barcode = enteredByCode.get(item.item_code);
-      item.barcode_entry_allowed = true;
-      item.warning = `Current barcode ${item.barcode} will be replaced`;
-    });
+    const result = await waitForBarcodeEntryJob(started.job_id);
+    applyConfirmedBarcodeChanges(result.entered, result.removed);
     state.barcodeEntryPending.clear();
     renderBarcodeEntryItems();
     if (elements.barcodeEntrySendDialog.open) elements.barcodeEntrySendDialog.close();
@@ -1592,25 +1652,65 @@ elements.reviewAssignments.addEventListener("click", async () => {
   }
 });
 
-document.querySelector("#assignment-preview-close").addEventListener("click", () => elements.assignmentPreviewDialog.close());
+document.querySelector("#assignment-preview-close").addEventListener("click", () => {
+  if (!state.assignmentSending) elements.assignmentPreviewDialog.close();
+});
+elements.assignmentPreviewDialog.addEventListener("cancel", (event) => {
+  if (state.assignmentSending) event.preventDefault();
+});
+
+async function waitForBarcodeAssignmentJob(jobId) {
+  let pollingFailures = 0;
+  while (true) {
+    let job;
+    try {
+      job = await api(
+        `/api/barcode-admin/assignments/jobs/${encodeURIComponent(jobId)}`,
+        { barcodeAdmin: true }
+      );
+      pollingFailures = 0;
+    } catch (error) {
+      pollingFailures += 1;
+      if (pollingFailures > 10 || (error.status && error.status < 500)) throw error;
+      elements.assignmentSendMessage.textContent = "Reconnecting to update status…";
+      elements.commitAssignments.textContent = "Reconnecting to update status…";
+      await wait(1000);
+      continue;
+    }
+    elements.assignmentSendMessage.textContent = job.message;
+    elements.assignmentSendMeter.max = Math.max(1, job.total);
+    elements.assignmentSendMeter.value = job.completed;
+    elements.commitAssignments.textContent = job.message;
+    if (job.status === "complete") return job.result;
+    if (job.status === "failed") {
+      const error = new Error(job.error || "The MYOB barcode assignment failed.");
+      error.status = job.http_status;
+      error.detail = job.detail;
+      throw error;
+    }
+    await wait(400);
+  }
+}
+
 elements.commitAssignments.addEventListener("click", async () => {
   if (!state.assignmentPreview || state.busy) return;
   state.busy = true;
+  state.assignmentSending = true;
   elements.commitAssignments.disabled = true;
-  elements.commitAssignments.textContent = "Writing to MYOB…";
+  elements.commitAssignments.textContent = "Preparing MYOB update…";
+  elements.assignmentSendProgress.hidden = false;
+  elements.assignmentSendMessage.textContent = "Preparing barcode assignments…";
+  elements.assignmentSendMeter.max = state.assignmentPreview.assignments.length;
+  elements.assignmentSendMeter.value = 0;
   try {
-    const result = await api("/api/barcode-admin/assignments/commit", {
+    const started = await api("/api/barcode-admin/assignments/jobs", {
       method: "POST",
       barcodeAdmin: true,
       body: JSON.stringify({ preview_token: state.assignmentPreview.preview_token }),
     });
-    const assignedByCode = new Map(result.assigned.map((item) => [item.item_code, item.barcode]));
-    state.assignmentItems.forEach((item) => {
-      if (!assignedByCode.has(item.item_code)) return;
-      item.barcode = assignedByCode.get(item.item_code);
-      item.assignable = true;
-      state.assignmentSelected.delete(item.item_code);
-    });
+    const result = await waitForBarcodeAssignmentJob(started.job_id);
+    applyConfirmedBarcodeChanges(result.assigned);
+    result.assigned.forEach((item) => state.assignmentSelected.delete(item.item_code));
     elements.assignmentPreviewDialog.close();
     state.assignmentPreview = null;
     renderAssignmentItems();
@@ -1631,6 +1731,8 @@ elements.commitAssignments.addEventListener("click", async () => {
     showMessage(`${error.message} Review the assignments again before retrying.`);
   } finally {
     state.busy = false;
+    state.assignmentSending = false;
+    elements.assignmentSendProgress.hidden = true;
     if (state.assignmentPreview) renderAssignmentPreview(state.assignmentPreview);
     updateAssignmentSummary();
   }

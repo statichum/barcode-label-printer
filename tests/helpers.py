@@ -14,6 +14,7 @@ def settings(tmp_path: Path, **overrides) -> Settings:
         "myob_company": "PRV",
         "myob_verify_ssl": True,
         "myob_timeout_seconds": 10,
+        "myob_barcode_write_concurrency": 3,
         "barcode_admin_pin": "2468",
         "barcode_admin_session_minutes": 30,
         "barcode_assignment_enabled": True,

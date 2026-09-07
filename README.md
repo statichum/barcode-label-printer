@@ -96,6 +96,7 @@ Set these values in the server's untracked `.env`:
 MYOB_USERNAME=PRVSyncerAPI
 MYOB_PASSWORD=...
 MYOB_COMPANY=PRV
+MYOB_BARCODE_WRITE_CONCURRENCY=3
 DATABASE_PASSWORD=...
 
 PRINTER_NAME=sato-barcode
@@ -149,7 +150,7 @@ Before each preview is shown, the app takes a filesystem lock, permanently reser
 
 The stored active-item catalogue is checked for collisions against Barcode rows only. Global, vendor, customer, and other cross-reference types are deliberately ignored because MYOB permits the same value to also be stored as a Barcode. Normal catalogue refreshes remain active-only.
 
-Immediately before writing, the app reads the selected items from MYOB, repeats the collision check, and uses the current-session Barcode detail row IDs. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. After writing, the assigned items are read back from MYOB and verified. **Select all filtered** includes matching items beyond the first 250 displayed rows. The normal limit is 350 assignments; an administrator can re-enter the PIN to unlock the full filtered catalogue for only that administration session. The server enforces the unlock, and it expires with the session.
+Immediately before writing, the app reads the selected items from MYOB, repeats the collision check, and uses the current-session Barcode detail row IDs. Items with multiple Barcode rows are refused and must be cleaned up in MYOB first. An existing row is deleted and its replacement is created in the same StockItem PUT—the behavior verified against the PRV endpoint. Writes use a bounded worker pool (three by default), then the affected items are read back from MYOB in small batches and verified. Both barcode-entry screens show live sending and checking counts, and confirmed values are patched into the persisted catalogue plus every catalogue already loaded in the browser. `MYOB_BARCODE_WRITE_CONCURRENCY` accepts 1 through 6; keep the default unless the MYOB Advanced licence is known to allow more simultaneous API requests. **Select all filtered** includes matching items beyond the first 250 displayed rows. The normal limit is 350 assignments; an administrator can re-enter the PIN to unlock the full filtered catalogue for only that administration session. The server enforces the unlock, and it expires with the session.
 
 Enable writes when ready to use the assignment screen:
 

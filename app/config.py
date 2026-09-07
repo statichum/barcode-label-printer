@@ -28,6 +28,7 @@ class Settings:
     myob_company: str
     myob_verify_ssl: bool
     myob_timeout_seconds: int
+    myob_barcode_write_concurrency: int
     barcode_admin_pin: str
     barcode_admin_session_minutes: int
     barcode_assignment_enabled: bool
@@ -81,6 +82,9 @@ class Settings:
             myob_company=os.getenv("MYOB_COMPANY", "PRV"),
             myob_verify_ssl=_bool("MYOB_VERIFY_SSL", True),
             myob_timeout_seconds=_int("MYOB_TIMEOUT_SECONDS", 45),
+            myob_barcode_write_concurrency=_int(
+                "MYOB_BARCODE_WRITE_CONCURRENCY", 3
+            ),
             barcode_admin_pin=os.getenv("BARCODE_ADMIN_PIN", "").strip(),
             barcode_admin_session_minutes=_int("BARCODE_ADMIN_SESSION_MINUTES", 30),
             barcode_assignment_enabled=_bool("BARCODE_ASSIGNMENT_ENABLED", False),
@@ -161,6 +165,8 @@ class Settings:
                 missing.append(name)
         if self.printer_print_speed not in {2, 3, 4}:
             missing.append("PRINTER_PRINT_SPEED (use 2, 3, or 4)")
+        if not 1 <= self.myob_barcode_write_concurrency <= 6:
+            missing.append("MYOB_BARCODE_WRITE_CONCURRENCY (use 1 through 6)")
         if self.printer_darkness not in {f"{level}A" for level in range(1, 6)}:
             missing.append("PRINTER_DARKNESS (use 1A through 5A)")
         if not 1 <= self.printer_send_attempts <= 10:

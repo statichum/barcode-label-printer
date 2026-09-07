@@ -756,14 +756,18 @@ class MyobClient:
             ) from exc
 
     def _authenticated_request(self, method: str, path: str, **kwargs):
+        # httpx.Client is thread-safe. Only authentication state needs to be
+        # serialised; holding this lock while making every request would turn
+        # the bounded barcode worker pool back into sequential requests.
         with self._lock:
             if not self._authenticated:
                 self._login()
-            response = self._client.request(method, path, **kwargs)
-            if response.status_code in {401, 403}:
+        response = self._client.request(method, path, **kwargs)
+        if response.status_code in {401, 403}:
+            with self._lock:
                 self._authenticated = False
                 self._login()
-                response = self._client.request(method, path, **kwargs)
+            response = self._client.request(method, path, **kwargs)
         return response
 
     def _authenticated_get(self, path: str, params: dict[str, str]):

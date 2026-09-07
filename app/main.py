@@ -6,6 +6,7 @@ import logging
 import secrets
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import psycopg
@@ -69,7 +70,7 @@ large_printing = PrintService(
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.14.0",
+    version="1.15.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -82,12 +83,18 @@ barcode_large_batch_sessions: dict[str, float] = {}
 barcode_assignment_previews: dict[str, dict] = {}
 barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0}
 barcode_stock_cache: dict = {"quantities": None, "stored_at": None}
+barcode_entry_jobs: dict[str, dict] = {}
+barcode_assignment_jobs: dict[str, dict] = {}
 barcode_admin_lock = threading.Lock()
 barcode_catalog_refresh_lock = threading.Lock()
 barcode_stock_refresh_lock = threading.Lock()
-barcode_entry_lock = threading.Lock()
+barcode_write_lock = threading.Lock()
+barcode_entry_jobs_lock = threading.Lock()
+barcode_assignment_jobs_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
 BARCODE_STOCK_CACHE_SECONDS = 24 * 60 * 60
+BARCODE_ENTRY_JOB_RETENTION_SECONDS = 60 * 60
+BARCODE_VERIFICATION_BATCH_SIZE = 5
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -531,8 +538,29 @@ def stock_on_hand_status():
     }
 
 
-@app.post("/api/barcode-entry/commit")
-def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
+def _barcode_write_workers(item_count: int) -> int:
+    return max(1, min(settings.myob_barcode_write_concurrency, item_count))
+
+
+def _barcode_chunks(values: list[str]) -> list[list[str]]:
+    return [
+        values[start : start + BARCODE_VERIFICATION_BATCH_SIZE]
+        for start in range(0, len(values), BARCODE_VERIFICATION_BATCH_SIZE)
+    ]
+
+
+def _has_exact_barcode(item: dict | None, expected: str) -> bool:
+    if item is None or item.get("barcode_reference_count") != 1:
+        return False
+    return {
+        value.casefold() for value in _barcode_reference_values(item)
+    } == {expected.casefold()}
+
+
+def _commit_entered_barcodes(
+    request: BarcodeEntryCommitRequest,
+    progress=lambda phase, completed, total, message: None,
+):
     if not settings.barcode_assignment_enabled:
         raise HTTPException(
             status_code=503,
@@ -542,7 +570,9 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
             ),
         )
 
-    with barcode_entry_lock:
+    with barcode_write_lock:
+        total = len(request.entries)
+        progress("preparing", 0, total, f"Checking {total} product barcode(s)…")
         try:
             catalogue, _ = load_assignment_catalog()
             reassignment_item_codes = [
@@ -578,7 +608,7 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
             logger.warning("Final MYOB barcode entry check failed: %s", exc)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        written = []
+        written: list[dict] = []
         removed = []
         try:
             removals = {
@@ -590,43 +620,120 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
                 for entry in planned
                 for removal in entry.get("remove_from", [])
             }
-            removed_reference_ids = set()
-            for item_code, barcode, cross_reference_id in sorted(removals):
-                myob.remove_barcode(item_code, cross_reference_id)
-                removed.append(
-                    {
-                        "item_code": item_code,
-                        "barcode": barcode,
-                    }
+            removed_reference_ids = {entry[2] for entry in removals}
+            if removals:
+                progress(
+                    "removing",
+                    0,
+                    total,
+                    f"Removing {len(removals)} conflicting barcode link(s)…",
                 )
-                removed_reference_ids.add(cross_reference_id)
-            for entry in planned:
-                if entry["action"] == "unchanged":
-                    continue
+            with ThreadPoolExecutor(
+                max_workers=_barcode_write_workers(len(removals))
+            ) as executor:
+                removal_futures = {
+                    executor.submit(
+                        myob.remove_barcode, item_code, cross_reference_id
+                    ): (item_code, barcode)
+                    for item_code, barcode, cross_reference_id in sorted(removals)
+                }
+                removal_error = None
+                for future in as_completed(removal_futures):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        removal_error = removal_error or exc
+                    else:
+                        item_code, barcode = removal_futures[future]
+                        removed.append({"item_code": item_code, "barcode": barcode})
+                if removal_error:
+                    raise removal_error
+
+            unchanged = [entry for entry in planned if entry["action"] == "unchanged"]
+            sendable = [entry for entry in planned if entry["action"] != "unchanged"]
+            sent_count = len(unchanged)
+            progress(
+                "sending",
+                sent_count,
+                total,
+                f"{sent_count}/{total} sent to MYOB",
+            )
+
+            def write_entry(entry: dict) -> None:
                 target_reference_id = entry.get("cross_reference_id")
                 if target_reference_id in removed_reference_ids:
                     target_reference_id = None
                 myob.assign_barcode(
-                    entry["item_code"],
-                    entry["barcode"],
-                    target_reference_id,
+                    entry["item_code"], entry["barcode"], target_reference_id
                 )
-                written.append(entry)
-            verification_codes = list(
+
+            with ThreadPoolExecutor(
+                max_workers=_barcode_write_workers(len(sendable))
+            ) as executor:
+                write_futures = {
+                    executor.submit(write_entry, entry): entry for entry in sendable
+                }
+                write_error = None
+                for future in as_completed(write_futures):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        write_error = write_error or exc
+                    else:
+                        entry = write_futures[future]
+                        written.append(entry)
+                        sent_count += 1
+                        progress(
+                            "sending",
+                            sent_count,
+                            total,
+                            f"{sent_count}/{total} sent to MYOB",
+                        )
+                if write_error:
+                    raise write_error
+
+            target_codes = list(
+                dict.fromkeys(entry["item_code"] for entry in planned)
+            )
+            removed_owner_codes = list(
                 dict.fromkeys(
-                    [entry["item_code"] for entry in planned]
-                    + [removal["item_code"] for removal in removed]
+                    removal["item_code"]
+                    for removal in removed
+                    if removal["item_code"].upper()
+                    not in {code.upper() for code in target_codes}
                 )
             )
-            verified = myob.get_assignment_stock_items(
-                verification_codes
-            )
+            verified: dict[str, dict] = {}
+            checked_count = 0
+            target_code_keys = {code.upper() for code in target_codes}
+            verification_codes = target_codes + removed_owner_codes
+            verification_chunks = _barcode_chunks(verification_codes)
+            progress("checking", 0, total, f"Checking 0/{total} in MYOB")
+            with ThreadPoolExecutor(
+                max_workers=_barcode_write_workers(len(verification_chunks))
+            ) as executor:
+                check_futures = {
+                    executor.submit(myob.get_assignment_stock_items, chunk): chunk
+                    for chunk in verification_chunks
+                }
+                for future in as_completed(check_futures):
+                    verified.update(future.result())
+                    checked_count += sum(
+                        code.upper() in target_code_keys
+                        for code in check_futures[future]
+                    )
+                    progress(
+                        "checking",
+                        checked_count,
+                        total,
+                        f"Checking {checked_count}/{total} in MYOB",
+                    )
             failed_verification = [
                 entry["item_code"]
                 for entry in planned
-                if verified.get(entry["item_code"].upper()) is None
-                or verified[entry["item_code"].upper()].get("barcode")
-                != entry["barcode"]
+                if not _has_exact_barcode(
+                    verified.get(entry["item_code"].upper()), entry["barcode"]
+                )
             ]
             if failed_verification:
                 raise MyobError(
@@ -674,13 +781,119 @@ def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
             ) from exc
 
         update_stored_assignment_catalog(verified)
+        progress("complete", total, total, f"{total}/{total} confirmed in MYOB")
         logger.info("Entered MYOB barcodes for %s item(s)", len(planned))
         return {
             "entered": planned,
+            "removed": removed,
             "count": len(planned),
             "written_count": len(written),
             "reassigned_count": len(removed),
         }
+
+
+@app.post("/api/barcode-entry/commit")
+def commit_entered_barcodes(request: BarcodeEntryCommitRequest):
+    """Synchronous compatibility endpoint used by API clients and tests."""
+    return _commit_entered_barcodes(request)
+
+
+def _set_barcode_entry_job(job_id: str, **changes) -> None:
+    with barcode_entry_jobs_lock:
+        barcode_entry_jobs[job_id].update(changes, updated_at=time.time())
+
+
+def _run_barcode_entry_job(job_id: str, request: BarcodeEntryCommitRequest) -> None:
+    def report(phase: str, completed: int, total: int, message: str) -> None:
+        _set_barcode_entry_job(
+            job_id,
+            status="running",
+            phase=phase,
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    try:
+        result = _commit_entered_barcodes(request, report)
+    except HTTPException as exc:
+        detail = exc.detail
+        message = detail.get("message", "MYOB update failed") if isinstance(detail, dict) else str(detail)
+        _set_barcode_entry_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error=message,
+            detail=detail,
+            http_status=exc.status_code,
+        )
+    except Exception:
+        logger.exception("Unexpected barcode-entry background job failure")
+        _set_barcode_entry_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error="The barcode update failed unexpectedly",
+            detail=None,
+            http_status=500,
+        )
+    else:
+        _set_barcode_entry_job(
+            job_id,
+            status="complete",
+            phase="complete",
+            completed=len(request.entries),
+            message=f"{len(request.entries)}/{len(request.entries)} confirmed in MYOB",
+            result=result,
+        )
+
+
+@app.post("/api/barcode-entry/jobs", status_code=202)
+def start_barcode_entry_job(request: BarcodeEntryCommitRequest):
+    if not settings.barcode_assignment_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Barcode writes are disabled; set "
+                "BARCODE_ASSIGNMENT_ENABLED=true to enable them"
+            ),
+        )
+    now = time.time()
+    with barcode_entry_jobs_lock:
+        expired = [
+            job_id
+            for job_id, job in barcode_entry_jobs.items()
+            if job.get("status") in {"complete", "failed"}
+            and now - job.get("updated_at", now) > BARCODE_ENTRY_JOB_RETENTION_SECONDS
+        ]
+        for job_id in expired:
+            barcode_entry_jobs.pop(job_id, None)
+        job_id = secrets.token_urlsafe(18)
+        barcode_entry_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "phase": "queued",
+            "completed": 0,
+            "total": len(request.entries),
+            "message": "Waiting to update MYOB…",
+            "updated_at": now,
+        }
+    threading.Thread(
+        target=_run_barcode_entry_job,
+        args=(job_id, request),
+        daemon=True,
+        name=f"barcode-entry-{job_id[:8]}",
+    ).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/barcode-entry/jobs/{job_id}")
+def barcode_entry_job_status(job_id: str):
+    with barcode_entry_jobs_lock:
+        job = barcode_entry_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Barcode update job was not found")
+        return dict(job)
 
 
 @app.post("/api/barcode-admin/unlock-large-batches")
@@ -744,12 +957,10 @@ def preview_barcode_assignments(
     }
 
 
-@app.post("/api/barcode-admin/assignments/commit")
-def commit_barcode_assignments(
+def _prepare_barcode_assignment_commit(
     request: BarcodeAssignmentCommitRequest,
-    authorization: str | None = Header(default=None),
-):
-    admin_token = require_barcode_admin(authorization)
+    admin_token: str,
+) -> list[dict]:
     if not settings.barcode_assignment_enabled:
         raise HTTPException(
             status_code=503,
@@ -764,7 +975,27 @@ def commit_barcode_assignments(
     ):
         raise HTTPException(status_code=409, detail="Assignment preview expired; review the items again")
 
-    assignments = preview["assignments"]
+    return preview["assignments"]
+
+
+def _commit_barcode_assignments(
+    assignments: list[dict],
+    admin_token: str,
+    progress=lambda phase, completed, total, message: None,
+):
+    with barcode_write_lock:
+        return _commit_barcode_assignments_locked(
+            assignments, admin_token, progress
+        )
+
+
+def _commit_barcode_assignments_locked(
+    assignments: list[dict],
+    admin_token: str,
+    progress,
+):
+    # Re-read and validate while holding the shared write lock. This prevents
+    # separate tablets from committing overlapping batches against stale data.
     try:
         all_items, _ = load_assignment_catalog()
         current_items = myob.get_assignment_stock_items(
@@ -782,23 +1013,64 @@ def commit_barcode_assignments(
         logger.warning("Final barcode catalogue check failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    assigned = []
+    assigned: list[dict] = []
+    total = len(assignments)
+    progress("sending", 0, total, f"0/{total} sent to MYOB")
     try:
-        for assignment in assignments:
-            myob.assign_barcode(
-                assignment["item_code"],
-                assignment["barcode"],
-                assignment.get("cross_reference_id"),
-            )
-            assigned.append(assignment)
-        verified = myob.get_assignment_stock_items(
-            [item["item_code"] for item in assignments]
-        )
+        with ThreadPoolExecutor(
+            max_workers=_barcode_write_workers(len(assignments))
+        ) as executor:
+            futures = {
+                executor.submit(
+                    myob.assign_barcode,
+                    assignment["item_code"],
+                    assignment["barcode"],
+                    assignment.get("cross_reference_id"),
+                ): assignment
+                for assignment in assignments
+            }
+            write_error = None
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    write_error = write_error or exc
+                else:
+                    assigned.append(futures[future])
+                    progress(
+                        "sending",
+                        len(assigned),
+                        total,
+                        f"{len(assigned)}/{total} sent to MYOB",
+                    )
+            if write_error:
+                raise write_error
+        verified = {}
+        checked = 0
+        progress("checking", 0, total, f"Checking 0/{total} in MYOB")
+        chunks = _barcode_chunks([item["item_code"] for item in assignments])
+        with ThreadPoolExecutor(
+            max_workers=_barcode_write_workers(len(chunks))
+        ) as executor:
+            futures = {
+                executor.submit(myob.get_assignment_stock_items, chunk): chunk
+                for chunk in chunks
+            }
+            for future in as_completed(futures):
+                verified.update(future.result())
+                checked += len(futures[future])
+                progress(
+                    "checking",
+                    checked,
+                    total,
+                    f"Checking {checked}/{total} in MYOB",
+                )
         failed_verification = [
             item["item_code"]
             for item in assignments
-            if verified.get(item["item_code"].upper()) is None
-            or verified[item["item_code"].upper()].get("barcode") != item["barcode"]
+            if not _has_exact_barcode(
+                verified.get(item["item_code"].upper()), item["barcode"]
+            )
         ]
         if failed_verification:
             raise MyobError(
@@ -815,8 +1087,120 @@ def commit_barcode_assignments(
 
     update_stored_assignment_catalog(verified)
     renew_barcode_admin_session(admin_token)
+    progress("complete", total, total, f"{total}/{total} confirmed in MYOB")
     logger.info("Assigned MYOB barcodes to %s item(s)", len(assigned))
-    return {"assigned": assigned, "count": len(assigned)}
+    return {"assigned": assignments, "count": len(assignments)}
+
+
+@app.post("/api/barcode-admin/assignments/commit")
+def commit_barcode_assignments(
+    request: BarcodeAssignmentCommitRequest,
+    authorization: str | None = Header(default=None),
+):
+    admin_token = require_barcode_admin(authorization)
+    assignments = _prepare_barcode_assignment_commit(request, admin_token)
+    return _commit_barcode_assignments(assignments, admin_token)
+
+
+def _set_barcode_assignment_job(job_id: str, **changes) -> None:
+    with barcode_assignment_jobs_lock:
+        barcode_assignment_jobs[job_id].update(changes, updated_at=time.time())
+
+
+def _run_barcode_assignment_job(
+    job_id: str, assignments: list[dict], admin_token: str
+) -> None:
+    def report(phase: str, completed: int, total: int, message: str) -> None:
+        _set_barcode_assignment_job(
+            job_id,
+            status="running",
+            phase=phase,
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    try:
+        result = _commit_barcode_assignments(assignments, admin_token, report)
+    except HTTPException as exc:
+        _set_barcode_assignment_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error=str(exc.detail),
+            detail=exc.detail,
+            http_status=exc.status_code,
+        )
+    except Exception:
+        logger.exception("Unexpected internal-barcode background job failure")
+        _set_barcode_assignment_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error="The barcode assignment failed unexpectedly",
+            detail=None,
+            http_status=500,
+        )
+    else:
+        _set_barcode_assignment_job(
+            job_id,
+            status="complete",
+            phase="complete",
+            completed=len(assignments),
+            message=f"{len(assignments)}/{len(assignments)} confirmed in MYOB",
+            result=result,
+        )
+
+
+@app.post("/api/barcode-admin/assignments/jobs", status_code=202)
+def start_barcode_assignment_job(
+    request: BarcodeAssignmentCommitRequest,
+    authorization: str | None = Header(default=None),
+):
+    admin_token = require_barcode_admin(authorization)
+    assignments = _prepare_barcode_assignment_commit(request, admin_token)
+    renew_barcode_admin_session(admin_token)
+    now = time.time()
+    job_id = secrets.token_urlsafe(18)
+    with barcode_assignment_jobs_lock:
+        expired = [
+            existing_job_id
+            for existing_job_id, job in barcode_assignment_jobs.items()
+            if job.get("status") in {"complete", "failed"}
+            and now - job.get("updated_at", now) > BARCODE_ENTRY_JOB_RETENTION_SECONDS
+        ]
+        for existing_job_id in expired:
+            barcode_assignment_jobs.pop(existing_job_id, None)
+        barcode_assignment_jobs[job_id] = {
+            "job_id": job_id,
+            "admin_token": admin_token,
+            "status": "queued",
+            "phase": "queued",
+            "completed": 0,
+            "total": len(assignments),
+            "message": "Waiting to update MYOB…",
+            "updated_at": now,
+        }
+    threading.Thread(
+        target=_run_barcode_assignment_job,
+        args=(job_id, assignments, admin_token),
+        daemon=True,
+        name=f"barcode-assignment-{job_id[:8]}",
+    ).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/barcode-admin/assignments/jobs/{job_id}")
+def barcode_assignment_job_status(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+):
+    admin_token = require_barcode_admin(authorization)
+    with barcode_assignment_jobs_lock:
+        job = barcode_assignment_jobs.get(job_id)
+        if job is None or job["admin_token"] != admin_token:
+            raise HTTPException(status_code=404, detail="Barcode assignment job was not found")
+        return {key: value for key, value in job.items() if key != "admin_token"}
 
 
 @app.post("/api/barcode-admin/stock-labels")

@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=32" />
+    <link rel="stylesheet" href="/static/styles.css?v=33" />
   </head>
   <body>
     <header class="topbar">
@@ -338,6 +338,7 @@
         <p class="eyebrow">UPDATING MYOB</p>
         <h2>Sending barcodes…</h2>
         <p id="barcode-entry-send-message">MYOB is updating and verifying the selected products.</p>
+        <progress id="barcode-entry-send-progress" value="0" max="1"></progress>
         <small>Keep this page open. Other barcode functions are paused until this finishes.</small>
       </div>
     </dialog>
@@ -406,6 +407,10 @@
         <p>MYOB is checked again immediately before these changes are written.</p>
         <div id="assignment-preview-list" class="assignment-preview-list"></div>
         <p id="assignment-write-warning" class="write-warning" hidden>Writes are disabled on the server until the MYOB PUT test is confirmed.</p>
+        <div id="assignment-send-progress" class="assignment-send-progress" role="status" aria-live="polite" hidden>
+          <p id="assignment-send-message">Preparing barcode assignments…</p>
+          <progress id="assignment-send-meter" value="0" max="1"></progress>
+        </div>
         <button id="commit-assignments" class="danger-button" type="button">Assign barcodes in MYOB</button>
       </div>
     </dialog>
@@ -449,6 +454,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=32" defer></script>
+    <script src="/static/app.js?v=33" defer></script>
   </body>
 </html>
