@@ -71,7 +71,7 @@ large_printing = PrintService(
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.17.1",
+    version="1.18.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -318,10 +318,10 @@ def load_barcode_stock_on_hand(
         def report_rows(completed: int, row_total: int) -> None:
             if progress:
                 progress(
-                    "processing",
+                    "receiving",
                     completed,
                     row_total,
-                    f"Processing stock items: {completed:,} / {row_total:,}",
+                    f"Receiving stock items: {completed:,} / {row_total:,}",
                 )
 
         if progress:
@@ -570,6 +570,17 @@ def _set_stock_refresh_job(job_id: str, **changes) -> None:
     with stock_refresh_jobs_lock:
         job = stock_refresh_jobs.get(job_id)
         if job is not None:
+            if "completed" in changes and "total" in changes:
+                sample = {
+                    "phase": changes.get("phase", job.get("phase", "running")),
+                    "completed": changes["completed"],
+                    "total": changes["total"],
+                    "message": changes.get("message", job.get("message", "")),
+                }
+                samples = job.setdefault("samples", [])
+                if not samples or sample != samples[-1]:
+                    samples.append(sample)
+                    del samples[:-120]
             job.update(changes, updated_at=time.time())
 
 
@@ -655,6 +666,7 @@ def start_stock_on_hand_refresh_job():
             "completed": 0,
             "total": total,
             "message": "Starting the MYOB stock refresh…",
+            "samples": [],
             "updated_at": now,
         }
     threading.Thread(

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -655,15 +657,32 @@ class MyobClient:
         started_at = time.monotonic()
         try:
             availability_timeout = max(self.settings.myob_timeout_seconds, 60)
-            response = self._authenticated_request(
+            with self._authenticated_stream(
                 "PUT",
                 f"{self.settings.myob_api_root}/StockAvailability",
                 params={"$expand": "Result"},
                 json={"Result": []},
                 timeout=availability_timeout,
-            )
-            response.raise_for_status()
-            payload = response.json()
+            ) as response:
+                response.raise_for_status()
+                content = bytearray()
+                last_completed = 0
+                received_rows = 0
+                inventory_marker = b'"InventoryID"'
+                marker_tail = b""
+                progress_interval = max(1, len(selected) // 100)
+                for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                    content.extend(chunk)
+                    if not progress or len(selected) <= 1:
+                        continue
+                    marker_window = marker_tail + chunk
+                    received_rows += marker_window.count(inventory_marker)
+                    marker_tail = marker_window[-(len(inventory_marker) - 1) :]
+                    completed = min(len(selected) - 1, received_rows)
+                    if completed >= last_completed + progress_interval:
+                        last_completed = completed
+                        progress(completed, len(selected))
+                payload = json.loads(content)
         except httpx.TimeoutException as exc:
             raise MyobError(
                 "MYOB stock availability took longer than one minute; try again"
@@ -679,8 +698,6 @@ class MyobClient:
             time.monotonic() - started_at,
         )
         matching_warehouse_rows = 0
-        processed_codes: set[str] = set()
-        progress_interval = max(1, len(selected) // 100)
         for row in result:
             code = str(_value(row, "InventoryID", "") or "").strip().upper()
             warehouse = str(_value(row, "WarehouseID", "") or "").strip().upper()
@@ -689,18 +706,11 @@ class MyobClient:
             matching_warehouse_rows += 1
             if code not in selected:
                 continue
-            first_row_for_code = code not in processed_codes
-            processed_codes.add(code)
             try:
                 quantity = Decimal(str(_value(row, "QtyAvailable", 0) or 0))
             except (InvalidOperation, TypeError, ValueError):
                 continue
             quantities[code] += max(0, int(quantity))
-            if progress and first_row_for_code and (
-                len(processed_codes) == len(selected)
-                or len(processed_codes) % progress_interval == 0
-            ):
-                progress(len(processed_codes), len(selected))
         if not matching_warehouse_rows:
             raise MyobError("MYOB returned no stock availability rows for MAIN")
         if progress:
@@ -778,6 +788,21 @@ class MyobClient:
                 self._login()
             response = self._client.request(method, path, **kwargs)
         return response
+
+    @contextmanager
+    def _authenticated_stream(self, method: str, path: str, **kwargs):
+        with self._lock:
+            if not self._authenticated:
+                self._login()
+        with self._client.stream(method, path, **kwargs) as response:
+            if response.status_code not in {401, 403}:
+                yield response
+                return
+        with self._lock:
+            self._authenticated = False
+            self._login()
+        with self._client.stream(method, path, **kwargs) as response:
+            yield response
 
     def _authenticated_get(self, path: str, params: dict[str, str]):
         return self._authenticated_request("GET", path, params=params)

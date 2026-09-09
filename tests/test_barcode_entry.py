@@ -354,6 +354,7 @@ def test_stock_refresh_job_reports_progress_and_returns_shared_snapshot(
     assert job["status"] == "complete"
     assert job["completed"] == 2
     assert job["total"] == 2
+    assert [sample["completed"] for sample in job["samples"]] == [0, 1, 2, 2, 2]
     assert job["result"]["quantities"] == {"ITEM1": 7, "ITEM2": 3}
     assert job["result"]["stock_cache_fresh"] is True
 

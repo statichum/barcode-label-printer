@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=39" />
+    <link rel="stylesheet" href="/static/styles.css?v=40" />
   </head>
   <body>
     <header class="topbar">
@@ -114,10 +114,6 @@
               </label>
               <button id="refresh-manual-stock" class="secondary-button" type="button">↻ Update stock from MYOB</button>
               <small id="manual-stock-status">Stock has not been refreshed on this tablet.</small>
-              <div id="manual-stock-progress" class="stock-refresh-meter" role="status" aria-live="polite" hidden>
-                <progress id="manual-stock-meter" value="0" max="1"></progress>
-                <small id="manual-stock-progress-copy">Starting stock refresh…</small>
-              </div>
             </div>
           </form>
         </div>
@@ -141,10 +137,6 @@
           <div id="barcode-entry-loading" class="assign-loading" role="status" aria-live="polite" hidden>
             <span class="loading-spinner" aria-hidden="true"></span>
             <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small id="barcode-entry-loading-detail">MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
-          </div>
-          <div id="barcode-entry-stock-progress" class="stock-refresh-meter entry-stock-progress" role="status" aria-live="polite" hidden>
-            <progress id="barcode-entry-stock-meter" value="0" max="1"></progress>
-            <small id="barcode-entry-stock-progress-copy">Starting stock refresh…</small>
           </div>
           <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>Available</span></div>
           <div id="barcode-entry-item-list" class="assign-item-list"></div>
@@ -351,6 +343,17 @@
       </div>
     </dialog>
 
+    <dialog id="stock-refresh-dialog" class="dialog blocking-progress-dialog">
+      <div class="dialog-card" role="status" aria-live="assertive" aria-atomic="true">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p class="eyebrow">REFRESHING STOCK</p>
+        <h2>Updating available stock…</h2>
+        <p id="stock-refresh-message">Requesting MAIN availability from MYOB.</p>
+        <progress id="stock-refresh-meter" value="0" max="1"></progress>
+        <small id="stock-refresh-count">Starting…</small>
+      </div>
+    </dialog>
+
     <dialog id="barcode-entry-result-dialog" class="dialog" aria-labelledby="barcode-entry-result-title" aria-describedby="barcode-entry-result-message">
       <div class="dialog-card">
         <button id="barcode-entry-result-close" class="dialog-close" type="button" aria-label="Close">×</button>
@@ -432,7 +435,7 @@
         <p>Use the stored <b>QtyAvailable</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 24 hours and can be refreshed on demand.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
-          <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small><progress id="stock-label-progress-meter" value="0" max="1" hidden></progress></span>
+          <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small></span>
         </div>
         <p id="stock-label-error" class="write-warning" hidden></p>
         <form id="stock-label-reauth" class="stock-label-reauth" hidden>
@@ -462,6 +465,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=39" defer></script>
+    <script src="/static/app.js?v=40" defer></script>
   </body>
 </html>

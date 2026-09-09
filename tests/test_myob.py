@@ -645,6 +645,7 @@ def test_main_qty_available_uses_stock_availability_gi_and_filters_selected_item
     assert request.url.params["$expand"] == "Result"
     assert request.extensions["timeout"]["read"] == 60.0
     assert request.read().decode() == '{"Result":[]}'
+    assert progress[0] == (1, 2)
     assert progress[-1] == (2, 2)
 
 
