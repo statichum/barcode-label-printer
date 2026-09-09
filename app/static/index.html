@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=38" />
+    <link rel="stylesheet" href="/static/styles.css?v=39" />
   </head>
   <body>
     <header class="topbar">
@@ -140,7 +140,11 @@
           </div>
           <div id="barcode-entry-loading" class="assign-loading" role="status" aria-live="polite" hidden>
             <span class="loading-spinner" aria-hidden="true"></span>
-            <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small id="barcode-entry-loading-detail">MYOB returns the catalogue in pages. This can take a few minutes.</small><progress id="barcode-entry-stock-meter" value="0" max="1" hidden></progress></span>
+            <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small id="barcode-entry-loading-detail">MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
+          </div>
+          <div id="barcode-entry-stock-progress" class="stock-refresh-meter entry-stock-progress" role="status" aria-live="polite" hidden>
+            <progress id="barcode-entry-stock-meter" value="0" max="1"></progress>
+            <small id="barcode-entry-stock-progress-copy">Starting stock refresh…</small>
           </div>
           <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>Available</span></div>
           <div id="barcode-entry-item-list" class="assign-item-list"></div>
@@ -458,6 +462,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=38" defer></script>
+    <script src="/static/app.js?v=39" defer></script>
   </body>
 </html>

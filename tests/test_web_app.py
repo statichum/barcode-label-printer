@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v38" in service_worker.text
+    assert "prv-label-station-v39" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -124,6 +124,7 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert 'api(`/api/stock-on-hand/refresh-jobs/${encodeURIComponent(started.job_id)}`)' in script
     assert 'id="manual-stock-meter"' in page
     assert 'id="barcode-entry-stock-meter"' in page
+    assert 'id="barcode-entry-stock-progress"' in page
     assert 'id="stock-label-progress-meter"' in page
     assert "terms.every((term) => searchable.includes(term))" in script
     assert 'barcode !== "x"' in script

@@ -80,7 +80,9 @@ const elements = {
   barcodeEntryLoading: document.querySelector("#barcode-entry-loading"),
   barcodeEntryLoadingTitle: document.querySelector("#barcode-entry-loading-title"),
   barcodeEntryLoadingDetail: document.querySelector("#barcode-entry-loading-detail"),
+  barcodeEntryStockProgress: document.querySelector("#barcode-entry-stock-progress"),
   barcodeEntryStockMeter: document.querySelector("#barcode-entry-stock-meter"),
+  barcodeEntryStockProgressCopy: document.querySelector("#barcode-entry-stock-progress-copy"),
   refreshBarcodeEntryItems: document.querySelector("#refresh-barcode-entry-items"),
   refreshBarcodeEntryStock: document.querySelector("#refresh-barcode-entry-stock"),
   clearBarcodeEntryBatch: document.querySelector("#clear-barcode-entry-batch"),
@@ -1081,7 +1083,6 @@ async function loadBarcodeEntryItems(refresh = false) {
     ? "Refreshing stock items from MYOB…"
     : "Loading the stock-item catalogue…";
   elements.barcodeEntryLoadingDetail.textContent = "MYOB returns the catalogue in pages. This can take a few minutes.";
-  elements.barcodeEntryStockMeter.hidden = true;
   elements.refreshBarcodeEntryItems.disabled = true;
   elements.refreshBarcodeEntryItems.textContent = refresh ? "Refreshing…" : "Loading…";
   updateBarcodeEntrySummary();
@@ -1108,17 +1109,14 @@ async function loadBarcodeEntryItems(refresh = false) {
 async function refreshBarcodeEntryStock() {
   if (state.busy) return;
   state.busy = true;
-  elements.barcodeEntryLoading.hidden = false;
-  elements.barcodeEntryLoadingTitle.textContent = "Refreshing MAIN available stock from MYOB…";
-  elements.barcodeEntryLoadingDetail.textContent = "Starting stock refresh…";
-  elements.barcodeEntryStockMeter.hidden = false;
+  elements.barcodeEntryStockProgress.hidden = false;
   elements.refreshBarcodeEntryItems.disabled = true;
   elements.refreshBarcodeEntryStock.disabled = true;
   elements.refreshBarcodeEntryStock.textContent = "Refreshing stock…";
   updateBarcodeEntrySummary();
   try {
     const response = await refreshStockWithProgress((job) => {
-      updateStockRefreshProgress(job, elements.barcodeEntryStockMeter, elements.barcodeEntryLoadingDetail);
+      updateStockRefreshProgress(job, elements.barcodeEntryStockMeter, elements.barcodeEntryStockProgressCopy);
     });
     applyStockRefreshResult(response);
     renderBarcodeEntryItems();
@@ -1127,8 +1125,7 @@ async function refreshBarcodeEntryStock() {
     showMessage(error.message);
   } finally {
     state.busy = false;
-    elements.barcodeEntryLoading.hidden = true;
-    elements.barcodeEntryStockMeter.hidden = true;
+    elements.barcodeEntryStockProgress.hidden = true;
     elements.refreshBarcodeEntryItems.disabled = false;
     elements.refreshBarcodeEntryStock.disabled = false;
     elements.refreshBarcodeEntryStock.textContent = "↻ Refresh available stock";
