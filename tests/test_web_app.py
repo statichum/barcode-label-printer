@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v36" in service_worker.text
+    assert "prv-label-station-v37" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -93,7 +93,7 @@ def test_manual_print_can_use_shared_stock_snapshot():
     script = client.get("/static/app.js").text
 
     assert 'id="manual-use-stock"' in page
-    assert "Use MAIN stock on hand as quantity" in page
+    assert "Use MAIN available stock as quantity" in page
     assert 'id="refresh-manual-stock"' in page
     assert 'api("/api/stock-on-hand/status")' in script
     assert "const stockCacheSeconds = 24 * 60 * 60;" in script
@@ -113,7 +113,7 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert 'id="barcode-entry-result-dialog"' in page
     assert 'id="barcode-entry-reassign"' in page
     assert 'id="refresh-and-prepare-stock-labels"' in page
-    assert "On hand" in page
+    assert "Available" in page
     assert 'api(`/api/barcode-entry/items${refresh ? "?refresh=true" : ""}`)' in script
     assert 'api("/api/barcode-entry/jobs"' in script
     assert 'api(`/api/barcode-entry/jobs/${encodeURIComponent(jobId)}`)' in script

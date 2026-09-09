@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=36" />
+    <link rel="stylesheet" href="/static/styles.css?v=37" />
   </head>
   <body>
     <header class="topbar">
@@ -109,8 +109,8 @@
             </div>
             <p class="field-help">Add one item at a time; quantities can still be changed below.</p>
             <div class="manual-stock-tools">
-              <label id="manual-stock-label" class="missing-toggle unavailable" title="Refresh stock on hand to use this quantity">
-                <input id="manual-use-stock" type="checkbox" disabled /> Use MAIN stock on hand as quantity
+              <label id="manual-stock-label" class="missing-toggle unavailable" title="Refresh available stock to use this quantity">
+                <input id="manual-use-stock" type="checkbox" disabled /> Use MAIN available stock as quantity
               </label>
               <button id="refresh-manual-stock" class="secondary-button" type="button">↻ Update stock from MYOB</button>
               <small id="manual-stock-status">Stock has not been refreshed on this tablet.</small>
@@ -124,13 +124,13 @@
               <input id="barcode-entry-search" type="search" autocomplete="off" placeholder="Start typing to filter…" />
             </label>
             <label class="missing-toggle"><input id="barcode-entry-missing-only" type="checkbox" checked /> Only items without a barcode</label>
-            <label id="barcode-entry-in-stock-label" class="missing-toggle unavailable" title="Refresh stock on hand to use this filter"><input id="barcode-entry-in-stock-only" type="checkbox" disabled /> In-stock items only</label>
+            <label id="barcode-entry-in-stock-label" class="missing-toggle unavailable" title="Refresh available stock to use this filter"><input id="barcode-entry-in-stock-only" type="checkbox" disabled /> In-stock items only</label>
             <button id="refresh-barcode-entry-items" class="secondary-button" type="button">↻ Refresh from MYOB</button>
           </div>
           <div class="assign-heading">
             <p id="barcode-entry-meta">Loading active stock items…</p>
             <div class="assign-selection-actions">
-              <button id="refresh-barcode-entry-stock" class="text-button" type="button">↻ Refresh stock on hand</button>
+              <button id="refresh-barcode-entry-stock" class="text-button" type="button">↻ Refresh available stock</button>
               <button id="clear-barcode-entry-batch" class="text-button" type="button">Clear batch</button>
             </div>
           </div>
@@ -138,7 +138,7 @@
             <span class="loading-spinner" aria-hidden="true"></span>
             <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small>MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
           </div>
-          <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>On hand</span></div>
+          <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>Available</span></div>
           <div id="barcode-entry-item-list" class="assign-item-list"></div>
           <div id="barcode-entry-queue" class="barcode-entry-queue" hidden></div>
           <div class="assign-bar">
@@ -421,7 +421,7 @@
         <p class="eyebrow">BARCODES ASSIGNED</p>
         <h2>Prepare stock labels?</h2>
         <p id="assignment-complete-summary"></p>
-        <p>Use the stored <b>QtyOnHand</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 24 hours and can be refreshed on demand.</p>
+        <p>Use the stored <b>QtyAvailable</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 24 hours and can be refreshed on demand.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
           <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small></span>
@@ -454,6 +454,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=36" defer></script>
+    <script src="/static/app.js?v=37" defer></script>
   </body>
 </html>

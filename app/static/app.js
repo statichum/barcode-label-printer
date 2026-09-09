@@ -565,8 +565,8 @@ function syncManualStockControls() {
   elements.manualUseStock.disabled = !fresh;
   elements.manualStockLabel.classList.toggle("unavailable", !fresh);
   elements.manualStockLabel.title = fresh
-    ? "Use the stored MAIN QtyOnHand as the label quantity"
-    : "Refresh stock on hand to use this quantity";
+    ? "Use the stored MAIN QtyAvailable as the label quantity"
+    : "Refresh available stock to use this quantity";
   if (!fresh) elements.manualUseStock.checked = false;
   elements.manualStockStatus.textContent = fresh
     ? `Stored stock from ${new Date(state.manualStockStoredAt * 1000).toLocaleString("en-NZ", { dateStyle: "medium", timeStyle: "short" })}; valid for 24 hours.`
@@ -593,7 +593,7 @@ async function refreshManualStock() {
   state.busy = true;
   elements.refreshManualStock.disabled = true;
   elements.refreshManualStock.textContent = "Refreshing MAIN stock…";
-  elements.manualStockStatus.textContent = "Loading stock from MYOB. This can take a few minutes…";
+  elements.manualStockStatus.textContent = "Loading available stock from MYOB…";
   try {
     const response = await api("/api/barcode-entry/stock-on-hand/refresh", { method: "POST" });
     state.manualStockStoredAt = response.stored_at;
@@ -602,7 +602,7 @@ async function refreshManualStock() {
     state.barcodeEntryStockFresh = true;
     elements.manualUseStock.checked = true;
     syncManualStockControls();
-    showToast("MAIN stock on hand refreshed from MYOB.");
+    showToast("MAIN available stock refreshed from MYOB.");
   } catch (error) {
     showMessage(error.message);
   } finally {
@@ -635,11 +635,11 @@ elements.manualForm.addEventListener("submit", async (event) => {
       const stockQuantity = Math.max(0, Number(item.qty_on_hand) || 0);
       requestedQuantity = Math.min(999, stockQuantity);
       if (!requestedQuantity) {
-        showMessage(`${item.item_code} has no stored stock on hand in MAIN.`, "info");
+        showMessage(`${item.item_code} has no available stock in MAIN.`, "info");
         return;
       }
       if (stockQuantity > 999) {
-        item.warning = `MAIN QtyOnHand is ${stockQuantity.toLocaleString("en-NZ")}; label quantity is limited to 999`;
+        item.warning = `MAIN QtyAvailable is ${stockQuantity.toLocaleString("en-NZ")}; label quantity is limited to 999`;
       }
     }
     if (state.resultMode !== "manual") {
@@ -914,8 +914,8 @@ function syncBarcodeEntryStockFilter() {
   elements.barcodeEntryInStockOnly.disabled = state.busy || !available;
   elements.barcodeEntryInStockLabel.classList.toggle("unavailable", !available);
   elements.barcodeEntryInStockLabel.title = available
-    ? "Show only items with MAIN stock on hand above zero"
-    : "Refresh stock on hand to use this filter";
+    ? "Show only items with MAIN available stock above zero"
+    : "Refresh available stock to use this filter";
 }
 
 function appendLoadMoreControl(container, total, visibleCount, loadMore) {
@@ -982,10 +982,10 @@ function renderBarcodeEntryItems() {
       ? item.stock_on_hand.toLocaleString("en-NZ")
       : "—";
     stock.title = stockCacheFresh && Number.isInteger(item.stock_on_hand)
-      ? "MAIN warehouse stock on hand"
+      ? "MAIN warehouse available stock"
       : state.barcodeEntryStockStoredAt
-      ? "The stock-on-hand cache has expired; refresh it to view stock"
-      : "Stock on hand has not been refreshed for this item";
+      ? "The available-stock cache has expired; refresh it to view stock"
+      : "Available stock has not been refreshed for this item";
     if (selectable) {
       row.classList.add("selectable");
       row.tabIndex = 0;
@@ -1062,7 +1062,7 @@ async function refreshBarcodeEntryStock() {
   if (state.busy) return;
   state.busy = true;
   elements.barcodeEntryLoading.hidden = false;
-  elements.barcodeEntryLoadingTitle.textContent = "Refreshing MAIN stock on hand from MYOB…";
+  elements.barcodeEntryLoadingTitle.textContent = "Refreshing MAIN available stock from MYOB…";
   elements.refreshBarcodeEntryItems.disabled = true;
   elements.refreshBarcodeEntryStock.disabled = true;
   elements.refreshBarcodeEntryStock.textContent = "Refreshing stock…";
@@ -1083,7 +1083,7 @@ async function refreshBarcodeEntryStock() {
     state.manualStockFresh = true;
     syncManualStockControls();
     renderBarcodeEntryItems();
-    showToast("MAIN stock on hand refreshed from MYOB.");
+    showToast("MAIN available stock refreshed from MYOB.");
   } catch (error) {
     showMessage(error.message);
   } finally {
@@ -1091,7 +1091,7 @@ async function refreshBarcodeEntryStock() {
     elements.barcodeEntryLoading.hidden = true;
     elements.refreshBarcodeEntryItems.disabled = false;
     elements.refreshBarcodeEntryStock.disabled = false;
-    elements.refreshBarcodeEntryStock.textContent = "↻ Refresh stock on hand";
+    elements.refreshBarcodeEntryStock.textContent = "↻ Refresh available stock";
     updateBarcodeEntrySummary();
   }
 }
@@ -1779,10 +1779,10 @@ async function prepareAssignedStockLabels(refreshStock = false) {
   elements.refreshAndPrepareStockLabels.disabled = true;
   elements.prepareStockLabels.textContent = refreshStock ? "Waiting for refresh…" : "Checking cache…";
   elements.stockLabelProgressTitle.textContent = refreshStock
-    ? "Refreshing MAIN stock on hand from MYOB…"
+    ? "Refreshing MAIN available stock from MYOB…"
     : "Checking stored MAIN stock…";
   elements.stockLabelProgressDetail.textContent = refreshStock
-    ? "MYOB returns the full warehouse dataset, so this can take a minute or two."
+    ? "The StockAvailability GI normally returns the warehouse snapshot in seconds."
     : "A valid stored snapshot is used immediately.";
   try {
     const response = await api(`/api/barcode-admin/stock-labels${refreshStock ? "?refresh_stock=true" : ""}`, {
@@ -1794,7 +1794,7 @@ async function prepareAssignedStockLabels(refreshStock = false) {
     closeAssignmentCompleteDialog();
     if (!response.items.length) {
       elements.results.hidden = true;
-      showMessage("None of the newly assigned items has stored QtyOnHand in MAIN.", "info");
+      showMessage("None of the newly assigned items has QtyAvailable in MAIN.", "info");
       return;
     }
     state.items = response.items;
@@ -1803,10 +1803,10 @@ async function prepareAssignedStockLabels(refreshStock = false) {
     state.reference = "MAIN stock after barcode assignment";
     applyResultSort();
     const zeroCopy = response.zero_stock.length
-      ? ` · ${response.zero_stock.length} with no stock on hand`
+      ? ` · ${response.zero_stock.length} with no available stock`
       : "";
     renderResults({
-      kicker: "MAIN STOCK ON HAND",
+      kicker: "MAIN AVAILABLE STOCK",
       title: "New barcode labels",
       meta: `${response.items.length} item${response.items.length === 1 ? "" : "s"} ready${zeroCopy}`,
     });

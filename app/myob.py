@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -639,24 +640,19 @@ class MyobClient:
     def list_active_stock_items(self) -> list[dict]:
         return self.list_stock_items(active_only=True)
 
-    def _get_main_quantity(
-        self,
-        item_codes: list[str],
-        *,
-        field_name: str,
-        description: str,
-    ) -> dict[str, int]:
+    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
         selected = {
             code.strip().upper()
             for code in item_codes
             if code and code.strip()
         }
         quantities = {code: 0 for code in selected}
+        started_at = time.monotonic()
         try:
-            availability_timeout = max(self.settings.myob_timeout_seconds, 180)
+            availability_timeout = max(self.settings.myob_timeout_seconds, 60)
             response = self._authenticated_request(
                 "PUT",
-                f"{self.settings.myob_api_root}/WebNinjaInventory",
+                f"{self.settings.myob_api_root}/StockAvailability",
                 params={"$expand": "Result"},
                 json={"Result": []},
                 timeout=availability_timeout,
@@ -665,38 +661,35 @@ class MyobClient:
             payload = response.json()
         except httpx.TimeoutException as exc:
             raise MyobError(
-                f"MYOB {description} took longer than three minutes; try again"
+                "MYOB stock availability took longer than one minute; try again"
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise MyobError(f"MYOB did not return valid MAIN {description}") from exc
+            raise MyobError("MYOB did not return valid MAIN stock availability") from exc
         result = payload.get("Result") if isinstance(payload, dict) else None
-        if not isinstance(result, list):
-            raise MyobError(f"MYOB did not return valid MAIN {description}")
+        if not isinstance(result, list) or not result:
+            raise MyobError("MYOB returned no stock availability rows")
+        logger.info(
+            "Loaded %s StockAvailability rows from MYOB in %.1f seconds",
+            len(result),
+            time.monotonic() - started_at,
+        )
+        matching_warehouse_rows = 0
         for row in result:
             code = str(_value(row, "InventoryID", "") or "").strip().upper()
-            warehouse = str(_value(row, "Warehouse", "") or "").strip().upper()
-            if code not in selected or warehouse != "MAIN":
+            warehouse = str(_value(row, "WarehouseID", "") or "").strip().upper()
+            if warehouse != "MAIN":
+                continue
+            matching_warehouse_rows += 1
+            if code not in selected:
                 continue
             try:
-                quantity = Decimal(str(_value(row, field_name, 0) or 0))
+                quantity = Decimal(str(_value(row, "QtyAvailable", 0) or 0))
             except (InvalidOperation, TypeError, ValueError):
                 continue
             quantities[code] += max(0, int(quantity))
+        if not matching_warehouse_rows:
+            raise MyobError("MYOB returned no stock availability rows for MAIN")
         return quantities
-
-    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
-        return self._get_main_quantity(
-            item_codes,
-            field_name="QtyAvailable",
-            description="stock availability",
-        )
-
-    def get_main_qty_on_hand(self, item_codes: list[str]) -> dict[str, int]:
-        return self._get_main_quantity(
-            item_codes,
-            field_name="QtyOnHand",
-            description="stock-on-hand data",
-        )
 
     def assign_barcode(
         self,

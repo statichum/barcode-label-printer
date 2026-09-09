@@ -1,5 +1,6 @@
-import time
+import json
 import threading
+import time
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -267,7 +268,7 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
     configured = settings(tmp_path)
     item = stock_item("ITEM1")
     myob = MagicMock()
-    myob.get_main_qty_on_hand.return_value = {"ITEM1": 7}
+    myob.get_main_qty_available.return_value = {"ITEM1": 7}
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     monkeypatch.setattr(
@@ -281,23 +282,27 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
     assert initial.status_code == 200
     assert initial.json()["items"][0]["stock_on_hand"] is None
     assert initial.json()["stock_stored_at"] is None
-    myob.get_main_qty_on_hand.assert_not_called()
+    myob.get_main_qty_available.assert_not_called()
 
     refreshed = client.post("/api/barcode-entry/stock-on-hand/refresh")
 
     assert refreshed.status_code == 200
     assert refreshed.json()["quantities"] == {"ITEM1": 7}
-    myob.get_main_qty_on_hand.assert_called_once_with(["ITEM1"])
+    myob.get_main_qty_available.assert_called_once_with(["ITEM1"])
     assert (configured.data_dir / "barcode-stock-on-hand.json").is_file()
+    snapshot = json.loads(
+        (configured.data_dir / "barcode-stock-on-hand.json").read_text()
+    )
+    assert snapshot["version"] == 2
 
     main.barcode_stock_cache.update({"quantities": None, "stored_at": None})
-    myob.get_main_qty_on_hand.reset_mock()
+    myob.get_main_qty_available.reset_mock()
     stored = client.get("/api/barcode-entry/items")
 
     assert stored.json()["items"][0]["stock_on_hand"] == 7
     assert stored.json()["stock_stored_at"] == refreshed.json()["stored_at"]
     assert stored.json()["stock_cache_fresh"] is True
-    myob.get_main_qty_on_hand.assert_not_called()
+    myob.get_main_qty_available.assert_not_called()
 
     main.barcode_stock_cache.update(
         {
@@ -309,7 +314,7 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
 
     assert expired.json()["items"][0]["stock_on_hand"] is None
     assert expired.json()["stock_cache_fresh"] is False
-    myob.get_main_qty_on_hand.assert_not_called()
+    myob.get_main_qty_available.assert_not_called()
 
 
 def test_barcode_entry_writes_use_the_configured_bounded_concurrency(

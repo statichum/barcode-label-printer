@@ -70,7 +70,7 @@ large_printing = PrintService(
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.15.0",
+    version="1.16.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -243,7 +243,7 @@ def _read_stored_barcode_stock() -> tuple[dict[str, int], float] | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         stored_at = float(payload["stored_at"])
         raw_quantities = payload["quantities"]
-        if payload.get("version") != 1 or not isinstance(raw_quantities, dict):
+        if payload.get("version") != 2 or not isinstance(raw_quantities, dict):
             raise ValueError("unsupported stock snapshot format")
         quantities = {
             str(code).strip().upper(): max(0, int(quantity))
@@ -266,7 +266,7 @@ def _write_stored_barcode_stock(
     temporary = path.with_suffix(".tmp")
     temporary.write_text(
         json.dumps(
-            {"version": 1, "stored_at": stored_at, "quantities": quantities}
+            {"version": 2, "stored_at": stored_at, "quantities": quantities}
         ),
         encoding="utf-8",
     )
@@ -298,7 +298,7 @@ def load_barcode_stock_on_hand(
             return (quantities if fresh else {}), stored_at, fresh
 
         items, _ = load_assignment_catalog()
-        quantities = myob.get_main_qty_on_hand(
+        quantities = myob.get_main_qty_available(
             [item["item_code"] for item in items if item.get("status") == "Active"]
         )
         stored_at = time.time()
@@ -306,7 +306,7 @@ def load_barcode_stock_on_hand(
         barcode_stock_cache.update(
             {"quantities": quantities, "stored_at": stored_at}
         )
-        logger.info("Stored MAIN stock on hand for %s items", len(quantities))
+        logger.info("Stored MAIN available stock for %s items", len(quantities))
         return quantities, stored_at, True
 
 
@@ -515,7 +515,7 @@ def refresh_barcode_entry_stock_on_hand():
     try:
         quantities, stored_at, _ = load_barcode_stock_on_hand(refresh=True)
     except MyobError as exc:
-        logger.warning("MYOB barcode stock-on-hand refresh failed: %s", exc)
+        logger.warning("MYOB barcode stock-availability refresh failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "quantities": quantities,
@@ -1217,14 +1217,14 @@ def barcode_assignment_stock_labels(
             load_barcode_stock_on_hand(refresh=refresh_stock)
         )
     except MyobError as exc:
-        logger.warning("MYOB MAIN stock-on-hand refresh failed: %s", exc)
+        logger.warning("MYOB MAIN stock-availability refresh failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not stock_cache_fresh:
         status = "expired" if stock_stored_at else "has not been refreshed"
         raise HTTPException(
             status_code=409,
             detail=(
-                f"The MAIN stock-on-hand cache {status}. Refresh stock before "
+                f"The MAIN available-stock cache {status}. Refresh stock before "
                 "preparing labels."
             ),
         )
@@ -1253,7 +1253,7 @@ def barcode_assignment_stock_labels(
                 "selected": bool(item.get("barcode")),
                 "printable": bool(item.get("barcode")),
                 "warning": (
-                    f"MAIN QtyOnHand is {on_hand}; label quantity is limited to 999"
+                    f"MAIN QtyAvailable is {on_hand}; label quantity is limited to 999"
                     if on_hand > 999
                     else None
                 ),

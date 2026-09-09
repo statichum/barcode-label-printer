@@ -592,7 +592,7 @@ def test_barcode_assignment_error_includes_myob_inner_exception(tmp_path):
     client._client.close()
 
 
-def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(
+def test_main_qty_available_uses_stock_availability_gi_and_filters_selected_items(
     tmp_path,
 ):
     requests = []
@@ -607,17 +607,17 @@ def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(
                 "Result": [
                     {
                         "InventoryID": field("NEW1"),
-                        "Warehouse": field("MAIN"),
+                        "WarehouseID": field("MAIN"),
                         "QtyAvailable": field(12),
                     },
                     {
                         "InventoryID": field("NEW1"),
-                        "Warehouse": field("INTR"),
+                        "WarehouseID": field("INTR"),
                         "QtyAvailable": field(99),
                     },
                     {
                         "InventoryID": field("OTHER"),
-                        "Warehouse": field("MAIN"),
+                        "WarehouseID": field("MAIN"),
                         "QtyAvailable": field(50),
                     },
                 ]
@@ -637,9 +637,9 @@ def test_main_qty_available_uses_web_ninja_inventory_and_filters_selected_items(
     assert quantities == {"NEW1": 12, "MISSING": 0}
     request = requests[-1]
     assert request.method == "PUT"
-    assert request.url.path.endswith("/WebNinjaInventory")
+    assert request.url.path.endswith("/StockAvailability")
     assert request.url.params["$expand"] == "Result"
-    assert request.extensions["timeout"]["read"] == 180.0
+    assert request.extensions["timeout"]["read"] == 60.0
     assert request.read().decode() == '{"Result":[]}'
 
 
@@ -647,7 +647,7 @@ def test_main_qty_available_reports_slow_myob_timeout(tmp_path):
     def handler(request):
         if request.url.path == "/entity/auth/login":
             return httpx.Response(204)
-        raise httpx.ReadTimeout("slow WebNinjaInventory", request=request)
+        raise httpx.ReadTimeout("slow StockAvailability", request=request)
 
     client = MyobClient(settings(tmp_path))
     client._client.close()
@@ -656,12 +656,30 @@ def test_main_qty_available_reports_slow_myob_timeout(tmp_path):
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(MyobError, match="longer than three minutes"):
+    with pytest.raises(MyobError, match="longer than one minute"):
         client.get_main_qty_available(["NEW1"])
     client._client.close()
 
 
-def test_main_qty_on_hand_uses_the_on_hand_field(tmp_path):
+def test_main_qty_available_rejects_an_empty_snapshot(tmp_path):
+    def handler(request):
+        if request.url.path == "/entity/auth/login":
+            return httpx.Response(204)
+        return httpx.Response(200, json={"Result": []})
+
+    client = MyobClient(settings(tmp_path))
+    client._client.close()
+    client._client = httpx.Client(
+        base_url="https://example.invalid",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(MyobError, match="no stock availability rows"):
+        client.get_main_qty_available(["NEW1"])
+    client._client.close()
+
+
+def test_main_qty_available_uses_available_not_on_hand(tmp_path):
     def handler(request):
         if request.url.path == "/entity/auth/login":
             return httpx.Response(204)
@@ -671,13 +689,13 @@ def test_main_qty_on_hand_uses_the_on_hand_field(tmp_path):
                 "Result": [
                     {
                         "InventoryID": field("NEW1"),
-                        "Warehouse": field("MAIN"),
+                        "WarehouseID": field("MAIN"),
                         "QtyOnHand": field(14),
                         "QtyAvailable": field(9),
                     },
                     {
                         "InventoryID": field("NEW1"),
-                        "Warehouse": field("INTR"),
+                        "WarehouseID": field("INTR"),
                         "QtyOnHand": field(99),
                     },
                 ]
@@ -691,7 +709,7 @@ def test_main_qty_on_hand_uses_the_on_hand_field(tmp_path):
         transport=httpx.MockTransport(handler),
     )
 
-    quantities = client.get_main_qty_on_hand(["new1"])
+    quantities = client.get_main_qty_available(["new1"])
     client._client.close()
 
-    assert quantities == {"NEW1": 14}
+    assert quantities == {"NEW1": 9}

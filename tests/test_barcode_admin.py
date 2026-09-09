@@ -142,7 +142,7 @@ def test_pin_protected_preview_rechecks_and_updates_existing_x_row(tmp_path, mon
         "warning": None,
     }
     assert stock_labels.json()["stock_stored_at"] == stock_stored_at
-    myob.get_main_qty_on_hand.assert_not_called()
+    myob.get_main_qty_available.assert_not_called()
 
 
 def test_internal_assignment_background_job_reports_progress(tmp_path, monkeypatch):
@@ -209,7 +209,7 @@ def test_stock_labels_require_a_fresh_cache_and_refresh_only_on_request(
         barcode_reference_value="012345678905",
     )
     myob = MagicMock()
-    myob.get_main_qty_on_hand.return_value = {"NEW": 5}
+    myob.get_main_qty_available.return_value = {"NEW": 5}
     monkeypatch.setattr(main, "settings", configured)
     monkeypatch.setattr(main, "myob", myob)
     monkeypatch.setattr(
@@ -234,7 +234,7 @@ def test_stock_labels_require_a_fresh_cache_and_refresh_only_on_request(
 
     assert expired.status_code == 409
     assert "cache expired" in expired.json()["detail"]
-    myob.get_main_qty_on_hand.assert_not_called()
+    myob.get_main_qty_available.assert_not_called()
 
     refreshed = client.post(
         "/api/barcode-admin/stock-labels?refresh_stock=true",
@@ -244,7 +244,7 @@ def test_stock_labels_require_a_fresh_cache_and_refresh_only_on_request(
 
     assert refreshed.status_code == 200
     assert refreshed.json()["items"][0]["qty_on_hand"] == 5
-    myob.get_main_qty_on_hand.assert_called_once_with(["NEW"])
+    myob.get_main_qty_available.assert_called_once_with(["NEW"])
 
 
 def test_barcode_admin_rejects_wrong_pin(tmp_path, monkeypatch):
