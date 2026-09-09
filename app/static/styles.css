@@ -186,6 +186,13 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
 .field-help { margin: 9px 0 0; color: var(--ink-muted); font-size: 12px; }
 .manual-stock-tools { display: grid; grid-template-columns: minmax(230px, auto) auto 1fr; align-items: center; gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 .manual-stock-tools > small { color: var(--ink-muted); font-size: 11px; line-height: 1.4; }
+.stock-refresh-meter { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: center; gap: 10px; }
+.stock-refresh-meter[hidden] { display: none; }
+.stock-refresh-meter progress,
+.assign-loading progress,
+.stock-label-progress progress { width: 100%; height: 12px; margin-top: 8px; accent-color: var(--forest); }
+.stock-refresh-meter progress { margin: 0; }
+.stock-refresh-meter small { color: var(--ink-muted); font-size: 11px; }
 
 .message { margin: 22px 0; padding: 15px 18px; border: 1px solid #efc4bd; border-radius: 5px; background: var(--danger-soft); color: #7a312b; font-size: 14px; }
 .message.info { border-color: #bcd8cf; background: #e9f5f0; color: var(--forest); }
@@ -344,6 +351,7 @@ html[data-theme="dark"] .theme-toggle .theme-sun { display: block; }
 .stock-label-progress[hidden] { display: none; }
 .stock-label-progress b, .stock-label-progress small { display: block; }
 .stock-label-progress small { margin-top: 3px; color: var(--ink-muted); font-size: 10px; }
+.stock-label-progress > span:last-child { flex: 1; min-width: 0; }
 .stock-label-reauth { margin: 16px 0; padding: 15px; border: 1px solid #bcd8cf; background: #e9f5f0; }
 .stock-label-reauth[hidden] { display: none; }
 .stock-label-reauth p { margin: 0 0 12px; color: var(--forest); }

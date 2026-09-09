@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=37" />
+    <link rel="stylesheet" href="/static/styles.css?v=38" />
   </head>
   <body>
     <header class="topbar">
@@ -114,6 +114,10 @@
               </label>
               <button id="refresh-manual-stock" class="secondary-button" type="button">↻ Update stock from MYOB</button>
               <small id="manual-stock-status">Stock has not been refreshed on this tablet.</small>
+              <div id="manual-stock-progress" class="stock-refresh-meter" role="status" aria-live="polite" hidden>
+                <progress id="manual-stock-meter" value="0" max="1"></progress>
+                <small id="manual-stock-progress-copy">Starting stock refresh…</small>
+              </div>
             </div>
           </form>
         </div>
@@ -136,7 +140,7 @@
           </div>
           <div id="barcode-entry-loading" class="assign-loading" role="status" aria-live="polite" hidden>
             <span class="loading-spinner" aria-hidden="true"></span>
-            <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small>MYOB returns the catalogue in pages. This can take a few minutes.</small></span>
+            <span><b id="barcode-entry-loading-title">Loading stock items from MYOB…</b><small id="barcode-entry-loading-detail">MYOB returns the catalogue in pages. This can take a few minutes.</small><progress id="barcode-entry-stock-meter" value="0" max="1" hidden></progress></span>
           </div>
           <div class="assign-table-head barcode-entry-table-head" aria-hidden="true"><span>Enter</span><span>Item</span><span>Current barcode</span><span>Available</span></div>
           <div id="barcode-entry-item-list" class="assign-item-list"></div>
@@ -424,7 +428,7 @@
         <p>Use the stored <b>QtyAvailable</b> for the <b>MAIN</b> warehouse. A stock snapshot remains valid for 24 hours and can be refreshed on demand.</p>
         <div id="stock-label-progress" class="stock-label-progress" role="status" aria-live="polite" hidden>
           <span class="loading-spinner" aria-hidden="true"></span>
-          <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small></span>
+          <span><b id="stock-label-progress-title">Checking stored MAIN stock…</b><small id="stock-label-progress-detail">A valid stored snapshot is used immediately.</small><progress id="stock-label-progress-meter" value="0" max="1" hidden></progress></span>
         </div>
         <p id="stock-label-error" class="write-warning" hidden></p>
         <form id="stock-label-reauth" class="stock-label-reauth" hidden>
@@ -454,6 +458,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=37" defer></script>
+    <script src="/static/app.js?v=38" defer></script>
   </body>
 </html>

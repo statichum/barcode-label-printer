@@ -5,6 +5,7 @@ import threading
 import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from typing import Callable
 
 import httpx
 
@@ -640,7 +641,11 @@ class MyobClient:
     def list_active_stock_items(self) -> list[dict]:
         return self.list_stock_items(active_only=True)
 
-    def get_main_qty_available(self, item_codes: list[str]) -> dict[str, int]:
+    def get_main_qty_available(
+        self,
+        item_codes: list[str],
+        progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, int]:
         selected = {
             code.strip().upper()
             for code in item_codes
@@ -674,6 +679,8 @@ class MyobClient:
             time.monotonic() - started_at,
         )
         matching_warehouse_rows = 0
+        processed_codes: set[str] = set()
+        progress_interval = max(1, len(selected) // 100)
         for row in result:
             code = str(_value(row, "InventoryID", "") or "").strip().upper()
             warehouse = str(_value(row, "WarehouseID", "") or "").strip().upper()
@@ -682,13 +689,22 @@ class MyobClient:
             matching_warehouse_rows += 1
             if code not in selected:
                 continue
+            first_row_for_code = code not in processed_codes
+            processed_codes.add(code)
             try:
                 quantity = Decimal(str(_value(row, "QtyAvailable", 0) or 0))
             except (InvalidOperation, TypeError, ValueError):
                 continue
             quantities[code] += max(0, int(quantity))
+            if progress and first_row_for_code and (
+                len(processed_codes) == len(selected)
+                or len(processed_codes) % progress_interval == 0
+            ):
+                progress(len(processed_codes), len(selected))
         if not matching_warehouse_rows:
             raise MyobError("MYOB returned no stock availability rows for MAIN")
+        if progress:
+            progress(len(selected), len(selected))
         return quantities
 
     def assign_barcode(

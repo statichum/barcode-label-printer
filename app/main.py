@@ -8,6 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 import psycopg
 from fastapi import FastAPI, Header, HTTPException
@@ -70,7 +71,7 @@ large_printing = PrintService(
 
 app = FastAPI(
     title="PRV Barcode Printer",
-    version="1.16.0",
+    version="1.17.0",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -85,15 +86,18 @@ barcode_catalog_cache: dict = {"items": None, "stored_at": None, "generation": 0
 barcode_stock_cache: dict = {"quantities": None, "stored_at": None}
 barcode_entry_jobs: dict[str, dict] = {}
 barcode_assignment_jobs: dict[str, dict] = {}
+stock_refresh_jobs: dict[str, dict] = {}
 barcode_admin_lock = threading.Lock()
 barcode_catalog_refresh_lock = threading.Lock()
 barcode_stock_refresh_lock = threading.Lock()
 barcode_write_lock = threading.Lock()
 barcode_entry_jobs_lock = threading.Lock()
 barcode_assignment_jobs_lock = threading.Lock()
+stock_refresh_jobs_lock = threading.Lock()
 DEFAULT_BARCODE_ASSIGNMENT_LIMIT = 350
 BARCODE_STOCK_CACHE_SECONDS = 24 * 60 * 60
 BARCODE_ENTRY_JOB_RETENTION_SECONDS = 60 * 60
+STOCK_REFRESH_JOB_RETENTION_SECONDS = 60 * 60
 BARCODE_VERIFICATION_BATCH_SIZE = 5
 
 
@@ -275,6 +279,7 @@ def _write_stored_barcode_stock(
 
 def load_barcode_stock_on_hand(
     refresh: bool = False,
+    progress: Callable[[str, int, int, str], None] | None = None,
 ) -> tuple[dict[str, int], float | None, bool]:
     with barcode_stock_refresh_lock:
         quantities = barcode_stock_cache["quantities"]
@@ -298,9 +303,34 @@ def load_barcode_stock_on_hand(
             return (quantities if fresh else {}), stored_at, fresh
 
         items, _ = load_assignment_catalog()
-        quantities = myob.get_main_qty_available(
-            [item["item_code"] for item in items if item.get("status") == "Active"]
-        )
+        item_codes = [
+            item["item_code"] for item in items if item.get("status") == "Active"
+        ]
+        total = len(item_codes)
+        if progress:
+            progress(
+                "requesting",
+                0,
+                total,
+                f"Requesting MAIN availability for {total:,} stock items from MYOB…",
+            )
+
+        def report_rows(completed: int, row_total: int) -> None:
+            if progress:
+                progress(
+                    "processing",
+                    completed,
+                    row_total,
+                    f"Processing stock items: {completed:,} / {row_total:,}",
+                )
+
+        if progress:
+            quantities = myob.get_main_qty_available(
+                item_codes, progress=report_rows
+            )
+            progress("storing", total, total, "Saving the refreshed stock snapshot…")
+        else:
+            quantities = myob.get_main_qty_available(item_codes)
         stored_at = time.time()
         _write_stored_barcode_stock(quantities, stored_at)
         barcode_stock_cache.update(
@@ -523,6 +553,126 @@ def refresh_barcode_entry_stock_on_hand():
         "stock_cache_fresh": True,
         "expires_at": stored_at + BARCODE_STOCK_CACHE_SECONDS,
     }
+
+
+def _last_known_stock_item_count() -> int:
+    with barcode_admin_lock:
+        cached_items = barcode_catalog_cache["items"]
+    if cached_items is not None:
+        return sum(item.get("status") == "Active" for item in cached_items)
+    stored = _read_stored_assignment_catalog()
+    if stored is None:
+        return 0
+    return sum(item.get("status") == "Active" for item in stored[0])
+
+
+def _set_stock_refresh_job(job_id: str, **changes) -> None:
+    with stock_refresh_jobs_lock:
+        job = stock_refresh_jobs.get(job_id)
+        if job is not None:
+            job.update(changes, updated_at=time.time())
+
+
+def _run_stock_refresh_job(job_id: str) -> None:
+    def report(phase: str, completed: int, total: int, message: str) -> None:
+        _set_stock_refresh_job(
+            job_id,
+            status="running",
+            phase=phase,
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    try:
+        quantities, stored_at, _ = load_barcode_stock_on_hand(
+            refresh=True, progress=report
+        )
+    except MyobError as exc:
+        logger.warning("MYOB barcode stock-availability refresh failed: %s", exc)
+        _set_stock_refresh_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error=str(exc),
+            http_status=502,
+        )
+    except Exception:
+        logger.exception("Unexpected stock-availability background job failure")
+        _set_stock_refresh_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            error="The stock refresh failed unexpectedly",
+            http_status=500,
+        )
+    else:
+        total = len(quantities)
+        _set_stock_refresh_job(
+            job_id,
+            status="complete",
+            phase="complete",
+            completed=total,
+            total=total,
+            message=f"{total:,} stock items refreshed from MYOB",
+            result={
+                "quantities": quantities,
+                "stored_at": stored_at,
+                "stock_cache_fresh": True,
+                "expires_at": stored_at + BARCODE_STOCK_CACHE_SECONDS,
+            },
+        )
+
+
+@app.post("/api/stock-on-hand/refresh-jobs", status_code=202)
+def start_stock_on_hand_refresh_job():
+    now = time.time()
+    with stock_refresh_jobs_lock:
+        expired = [
+            job_id
+            for job_id, job in stock_refresh_jobs.items()
+            if job.get("status") in {"complete", "failed"}
+            and now - job.get("updated_at", now) > STOCK_REFRESH_JOB_RETENTION_SECONDS
+        ]
+        for job_id in expired:
+            stock_refresh_jobs.pop(job_id, None)
+        existing = next(
+            (
+                job
+                for job in stock_refresh_jobs.values()
+                if job.get("status") in {"queued", "running"}
+            ),
+            None,
+        )
+        if existing is not None:
+            return {"job_id": existing["job_id"]}
+        job_id = secrets.token_urlsafe(18)
+        total = _last_known_stock_item_count()
+        stock_refresh_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "phase": "queued",
+            "completed": 0,
+            "total": total,
+            "message": "Starting the MYOB stock refresh…",
+            "updated_at": now,
+        }
+    threading.Thread(
+        target=_run_stock_refresh_job,
+        args=(job_id,),
+        daemon=True,
+        name=f"stock-refresh-{job_id[:8]}",
+    ).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/stock-on-hand/refresh-jobs/{job_id}")
+def stock_on_hand_refresh_job_status(job_id: str):
+    with stock_refresh_jobs_lock:
+        job = stock_refresh_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Stock refresh job was not found")
+        return dict(job)
 
 
 @app.get("/api/stock-on-hand/status")

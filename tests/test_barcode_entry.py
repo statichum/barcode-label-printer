@@ -35,6 +35,8 @@ def reset_barcode_catalog():
             {"items": None, "stored_at": None, "generation": 0}
         )
     main.barcode_stock_cache.update({"quantities": None, "stored_at": None})
+    with main.stock_refresh_jobs_lock:
+        main.stock_refresh_jobs.clear()
 
 
 def test_barcode_entry_catalogue_is_available_without_a_pin(tmp_path, monkeypatch):
@@ -315,6 +317,45 @@ def test_barcode_entry_stock_is_only_refreshed_on_request_and_then_stored(
     assert expired.json()["items"][0]["stock_on_hand"] is None
     assert expired.json()["stock_cache_fresh"] is False
     myob.get_main_qty_available.assert_not_called()
+
+
+def test_stock_refresh_job_reports_progress_and_returns_shared_snapshot(
+    tmp_path, monkeypatch
+):
+    configured = settings(tmp_path)
+    items = [stock_item("ITEM1"), stock_item("ITEM2")]
+    myob = MagicMock()
+
+    def refresh(item_codes, progress=None):
+        assert item_codes == ["ITEM1", "ITEM2"]
+        progress(1, 2)
+        progress(2, 2)
+        return {"ITEM1": 7, "ITEM2": 3}
+
+    myob.get_main_qty_available.side_effect = refresh
+    monkeypatch.setattr(main, "settings", configured)
+    monkeypatch.setattr(main, "myob", myob)
+    monkeypatch.setattr(
+        main, "load_assignment_catalog", lambda refresh=False: (items, 100.0)
+    )
+    reset_barcode_catalog()
+    client = TestClient(main.app)
+
+    started = client.post("/api/stock-on-hand/refresh-jobs")
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    for _ in range(50):
+        job = client.get(f"/api/stock-on-hand/refresh-jobs/{job_id}").json()
+        if job["status"] == "complete":
+            break
+        time.sleep(0.01)
+
+    assert job["status"] == "complete"
+    assert job["completed"] == 2
+    assert job["total"] == 2
+    assert job["result"]["quantities"] == {"ITEM1": 7, "ITEM2": 3}
+    assert job["result"]["stock_cache_fresh"] is True
 
 
 def test_barcode_entry_writes_use_the_configured_bounded_concurrency(

@@ -46,6 +46,9 @@ const elements = {
   manualStockLabel: document.querySelector("#manual-stock-label"),
   manualStockStatus: document.querySelector("#manual-stock-status"),
   refreshManualStock: document.querySelector("#refresh-manual-stock"),
+  manualStockProgress: document.querySelector("#manual-stock-progress"),
+  manualStockMeter: document.querySelector("#manual-stock-meter"),
+  manualStockProgressCopy: document.querySelector("#manual-stock-progress-copy"),
   workspace: document.querySelector(".workspace"),
   message: document.querySelector("#message"),
   results: document.querySelector("#results"),
@@ -76,6 +79,8 @@ const elements = {
   barcodeEntryItemList: document.querySelector("#barcode-entry-item-list"),
   barcodeEntryLoading: document.querySelector("#barcode-entry-loading"),
   barcodeEntryLoadingTitle: document.querySelector("#barcode-entry-loading-title"),
+  barcodeEntryLoadingDetail: document.querySelector("#barcode-entry-loading-detail"),
+  barcodeEntryStockMeter: document.querySelector("#barcode-entry-stock-meter"),
   refreshBarcodeEntryItems: document.querySelector("#refresh-barcode-entry-items"),
   refreshBarcodeEntryStock: document.querySelector("#refresh-barcode-entry-stock"),
   clearBarcodeEntryBatch: document.querySelector("#clear-barcode-entry-batch"),
@@ -129,6 +134,7 @@ const elements = {
   stockLabelProgress: document.querySelector("#stock-label-progress"),
   stockLabelProgressTitle: document.querySelector("#stock-label-progress-title"),
   stockLabelProgressDetail: document.querySelector("#stock-label-progress-detail"),
+  stockLabelProgressMeter: document.querySelector("#stock-label-progress-meter"),
   stockLabelError: document.querySelector("#stock-label-error"),
   stockLabelReauth: document.querySelector("#stock-label-reauth"),
   stockLabelReauthCopy: document.querySelector("#stock-label-reauth-copy"),
@@ -260,6 +266,44 @@ async function api(path, options = {}) {
     throw error;
   }
   return data;
+}
+
+function updateStockRefreshProgress(job, meter, copy) {
+  const total = Math.max(0, Number(job.total) || 0);
+  const completed = Math.min(total, Math.max(0, Number(job.completed) || 0));
+  meter.max = Math.max(1, total);
+  meter.value = completed;
+  const count = total ? ` (${completed.toLocaleString("en-NZ")} / ${total.toLocaleString("en-NZ")})` : "";
+  copy.textContent = `${job.message || "Refreshing stock from MYOB…"}${job.phase === "processing" ? "" : count}`;
+}
+
+async function refreshStockWithProgress(onProgress) {
+  const started = await api("/api/stock-on-hand/refresh-jobs", { method: "POST" });
+  while (true) {
+    const job = await api(`/api/stock-on-hand/refresh-jobs/${encodeURIComponent(started.job_id)}`);
+    onProgress(job);
+    if (job.status === "complete") return job.result;
+    if (job.status === "failed") {
+      const error = new Error(job.error || "The stock refresh failed");
+      error.status = job.http_status || 502;
+      throw error;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+  }
+}
+
+function applyStockRefreshResult(response) {
+  state.barcodeEntryItems.forEach((item) => {
+    const itemCode = item.item_code.toLocaleUpperCase();
+    item.stock_on_hand = Object.hasOwn(response.quantities, itemCode)
+      ? response.quantities[itemCode]
+      : null;
+  });
+  state.barcodeEntryStockStoredAt = response.stored_at;
+  state.barcodeEntryStockFresh = true;
+  state.manualStockStoredAt = response.stored_at;
+  state.manualStockFresh = true;
+  syncManualStockControls();
 }
 
 function setBusy(busy) {
@@ -594,12 +638,12 @@ async function refreshManualStock() {
   elements.refreshManualStock.disabled = true;
   elements.refreshManualStock.textContent = "Refreshing MAIN stock…";
   elements.manualStockStatus.textContent = "Loading available stock from MYOB…";
+  elements.manualStockProgress.hidden = false;
   try {
-    const response = await api("/api/barcode-entry/stock-on-hand/refresh", { method: "POST" });
-    state.manualStockStoredAt = response.stored_at;
-    state.manualStockFresh = true;
-    state.barcodeEntryStockStoredAt = response.stored_at;
-    state.barcodeEntryStockFresh = true;
+    const response = await refreshStockWithProgress((job) => {
+      updateStockRefreshProgress(job, elements.manualStockMeter, elements.manualStockProgressCopy);
+    });
+    applyStockRefreshResult(response);
     elements.manualUseStock.checked = true;
     syncManualStockControls();
     showToast("MAIN available stock refreshed from MYOB.");
@@ -609,6 +653,7 @@ async function refreshManualStock() {
     state.busy = false;
     elements.refreshManualStock.disabled = false;
     elements.refreshManualStock.textContent = "↻ Update stock from MYOB";
+    elements.manualStockProgress.hidden = true;
     syncManualStockControls();
     updateSummary();
   }
@@ -1035,6 +1080,8 @@ async function loadBarcodeEntryItems(refresh = false) {
   elements.barcodeEntryLoadingTitle.textContent = refresh
     ? "Refreshing stock items from MYOB…"
     : "Loading the stock-item catalogue…";
+  elements.barcodeEntryLoadingDetail.textContent = "MYOB returns the catalogue in pages. This can take a few minutes.";
+  elements.barcodeEntryStockMeter.hidden = true;
   elements.refreshBarcodeEntryItems.disabled = true;
   elements.refreshBarcodeEntryItems.textContent = refresh ? "Refreshing…" : "Loading…";
   updateBarcodeEntrySummary();
@@ -1063,25 +1110,17 @@ async function refreshBarcodeEntryStock() {
   state.busy = true;
   elements.barcodeEntryLoading.hidden = false;
   elements.barcodeEntryLoadingTitle.textContent = "Refreshing MAIN available stock from MYOB…";
+  elements.barcodeEntryLoadingDetail.textContent = "Starting stock refresh…";
+  elements.barcodeEntryStockMeter.hidden = false;
   elements.refreshBarcodeEntryItems.disabled = true;
   elements.refreshBarcodeEntryStock.disabled = true;
   elements.refreshBarcodeEntryStock.textContent = "Refreshing stock…";
   updateBarcodeEntrySummary();
   try {
-    const response = await api("/api/barcode-entry/stock-on-hand/refresh", {
-      method: "POST",
+    const response = await refreshStockWithProgress((job) => {
+      updateStockRefreshProgress(job, elements.barcodeEntryStockMeter, elements.barcodeEntryLoadingDetail);
     });
-    state.barcodeEntryItems.forEach((item) => {
-      const itemCode = item.item_code.toLocaleUpperCase();
-      item.stock_on_hand = Object.hasOwn(response.quantities, itemCode)
-        ? response.quantities[itemCode]
-        : null;
-    });
-    state.barcodeEntryStockStoredAt = response.stored_at;
-    state.barcodeEntryStockFresh = true;
-    state.manualStockStoredAt = response.stored_at;
-    state.manualStockFresh = true;
-    syncManualStockControls();
+    applyStockRefreshResult(response);
     renderBarcodeEntryItems();
     showToast("MAIN available stock refreshed from MYOB.");
   } catch (error) {
@@ -1089,6 +1128,7 @@ async function refreshBarcodeEntryStock() {
   } finally {
     state.busy = false;
     elements.barcodeEntryLoading.hidden = true;
+    elements.barcodeEntryStockMeter.hidden = true;
     elements.refreshBarcodeEntryItems.disabled = false;
     elements.refreshBarcodeEntryStock.disabled = false;
     elements.refreshBarcodeEntryStock.textContent = "↻ Refresh available stock";
@@ -1784,8 +1824,16 @@ async function prepareAssignedStockLabels(refreshStock = false) {
   elements.stockLabelProgressDetail.textContent = refreshStock
     ? "The StockAvailability GI normally returns the warehouse snapshot in seconds."
     : "A valid stored snapshot is used immediately.";
+  elements.stockLabelProgressMeter.hidden = !refreshStock;
   try {
-    const response = await api(`/api/barcode-admin/stock-labels${refreshStock ? "?refresh_stock=true" : ""}`, {
+    if (refreshStock) {
+      const stock = await refreshStockWithProgress((job) => {
+        updateStockRefreshProgress(job, elements.stockLabelProgressMeter, elements.stockLabelProgressDetail);
+      });
+      applyStockRefreshResult(stock);
+      elements.stockLabelProgressTitle.textContent = "Preparing labels from refreshed stock…";
+    }
+    const response = await api("/api/barcode-admin/stock-labels", {
       method: "POST",
       barcodeAdmin: true,
       body: JSON.stringify({ item_codes: state.lastAssignedItems.map((item) => item.item_code) }),
@@ -1820,6 +1868,7 @@ async function prepareAssignedStockLabels(refreshStock = false) {
   } finally {
     state.busy = false;
     elements.stockLabelProgress.hidden = true;
+    elements.stockLabelProgressMeter.hidden = true;
     elements.prepareStockLabels.disabled = !elements.stockLabelReauth.hidden;
     elements.refreshAndPrepareStockLabels.disabled = !elements.stockLabelReauth.hidden;
     elements.prepareStockLabels.textContent = "Use stored stock";

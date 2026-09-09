@@ -631,7 +631,11 @@ def test_main_qty_available_uses_stock_availability_gi_and_filters_selected_item
         transport=httpx.MockTransport(handler),
     )
 
-    quantities = client.get_main_qty_available(["new1", "missing"])
+    progress = []
+    quantities = client.get_main_qty_available(
+        ["new1", "missing"],
+        progress=lambda completed, total: progress.append((completed, total)),
+    )
     client._client.close()
 
     assert quantities == {"NEW1": 12, "MISSING": 0}
@@ -641,6 +645,7 @@ def test_main_qty_available_uses_stock_availability_gi_and_filters_selected_item
     assert request.url.params["$expand"] == "Result"
     assert request.extensions["timeout"]["read"] == 60.0
     assert request.read().decode() == '{"Result":[]}'
+    assert progress[-1] == (2, 2)
 
 
 def test_main_qty_available_reports_slow_myob_timeout(tmp_path):
