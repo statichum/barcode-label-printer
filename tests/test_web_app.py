@@ -65,7 +65,7 @@ def test_web_app_manifest_and_icons_are_served():
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
-    assert "prv-label-station-v35" in service_worker.text
+    assert "prv-label-station-v36" in service_worker.text
 
 
 def test_label_ui_defaults_to_natural_sort_and_clears_a_successful_batch():
@@ -124,6 +124,7 @@ def test_barcode_entry_ui_uses_unprotected_catalogue_and_batch_commit_endpoints(
     assert '"?refresh_stock=true"' in script
     assert "terms.every((term) => searchable.includes(term))" in script
     assert 'barcode !== "x"' in script
+    assert '.startsWith("XCC")' in script
     assert "const catalogueRenderBatchSize = 250;" in script
     assert 'button.textContent = `Load ${nextCount.toLocaleString("en-NZ")} more`;' in script
     assert script.count('addEventListener("scroll"') >= 2

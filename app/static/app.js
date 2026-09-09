@@ -836,7 +836,10 @@ function hasUsableBarcode(item) {
 }
 
 function barcodeEntryMatches(item, query) {
-  if (elements.barcodeEntryMissingOnly.checked && hasUsableBarcode(item)) return false;
+  if (elements.barcodeEntryMissingOnly.checked) {
+    if (hasUsableBarcode(item)) return false;
+    if (String(item.item_code || "").trim().toLocaleUpperCase().startsWith("XCC")) return false;
+  }
   if (elements.barcodeEntryInStockOnly.checked && Number(item.stock_on_hand) <= 0) return false;
   return matchesSearchTerms(item, query);
 }
